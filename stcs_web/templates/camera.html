@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="console cols3">
+  <div class="col">
+    <div class="sec"><h3>Camera status <span class="tag st bad">Disconnected</span></h3><div class="sec-body">
+      <dl class="kv"><dt>Driver</dt><dd class="st dim">Not available</dd>
+      <dt>Sensor</dt><dd>—</dd><dt>Link</dt><dd class="st dim">Disconnected</dd>
+      <dt>Acquisition</dt><dd class="st dim">Idle</dd>
+      <dt>Sensor temp</dt><dd>—</dd></dl>
+    </div></div>
+    <div class="sec"><h3>All-sky <span class="tag st dim">Offline</span></h3><div class="sec-body">
+      <label class="f">Image source</label><input value="http://192.168.1.100/image.jpg" disabled title="Configurable when the all-sky feed is online">
+      <p class="note mt">All-sky feed offline. Last update: never.</p>
+    </div></div>
+  </div>
+  <div class="col">
+    <div class="sec"><h3>Acquisition</h3><div class="sec-body">
+      <label class="f">Exposure (s)</label><input value="1.0" disabled title="Available when the camera is connected">
+      <div class="row"><div style="flex:1"><label class="f">Binning</label><select disabled><option>1×1</option><option>2×2</option><option>4×4</option></select></div>
+      <div style="flex:1"><label class="f">Frames</label><input value="1" disabled title="Available when the camera is connected"></div></div>
+      <label class="f">Shutter</label><select disabled><option>Normal</option><option>Always open</option><option>Always closed</option></select>
+      <div class="row mt"><button class="btn primary block" disabled>Acquire Frame</button></div>
+      <p class="note mt">Shutter, gain, readout speed, ROI and trigger settings activate with the camera link. Nothing is acquired automatically.</p>
+    </div></div>
+  </div>
+  <div class="col">
+    <div class="sec"><h3>Preview <span class="tag">no frame</span></h3><div class="sec-body">
+      <div style="background:var(--well);border:1px solid var(--line);border-radius:5px;min-height:220px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
+        <span style="font-size:26px;color:var(--faint)">◈</span>
+        <span class="note">No frame — the camera is disconnected.</span>
+      </div>
+    </div></div>
+    <div class="sec"><h3>Image history <span class="tag">0 frames</span></h3><div class="sec-body scroll">
+      <p class="note">Acquired frames will list here with metadata and download. Nothing recorded yet.</p>
+    </div></div>
+  </div>
+</div>
+{% endblock %}

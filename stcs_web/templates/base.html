@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="stcs-csrf-token" content="{{ csrf_token }}">
+<title>{{ page_title }} — ARIES 104 cm STCS</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="hdr">
+    <div class="brand"><b>ARIES</b><span>104 CM SAMPURNANAND</span></div>
+    <div class="sys">
+      <span class="pill {{ 'ok' if snap and snap.alpaca.status=='LIVE' else ('warn' if snap and snap.alpaca.status=='STALE' else 'bad') }}">{{ system_state }}</span>
+      <span class="note">{{ mode }}</span>
+    </div>
+    <div class="stats" role="status" aria-label="System status">
+      <div class="stat"><span class="k">MOUNT</span><span class="v {{ led }}">{{ snap.alpaca.status|disp if snap else '—' }}</span></div>
+      <div class="stat"><span class="k">DOME</span><span class="v {{ led }}">{{ snap.alpaca.status|disp if snap else '—' }}</span></div>
+      <div class="stat"><span class="k">GPS</span><span class="v dim">Not available</span></div>
+      <div class="stat"><span class="k">WEATHER</span><span class="v {{ 'ok' if snap and snap.weather.status=='LIVE' else 'dim' }}">{{ snap.weather.status|disp if snap else '—' }}</span></div>
+      <div class="stat"><span class="k">DATABASE</span><span class="v {{ 'ok' if db_ok else 'bad' }}">{{ 'Ready' if db_ok else 'Down' }}</span></div>
+      <div class="stat"><span class="k">LOCK</span><span class="v dim">{{ snap.control_lock.owner if snap and snap.control_lock.owner else 'Free' }}</span></div>
+    </div>
+    <div class="meta">
+      <div class="clock"><span id="clock">--:--:--</span><small>LOCAL</small></div>
+      <div class="user">{{ username }}<br><span style="color:var(--faint)">{{ role|title }}</span></div>
+    </div>
+    <div class="meta" style="border-left:0">
+      <form method="post" action="/api/command/validate" onsubmit="return confirm('Emergency stop? This halts active telescope motion immediately.');">
+        <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="command" value="emergency_stop">
+        <button class="estop-hdr" type="submit" title="Stops active telescope motion immediately">E-STOP</button>
+      </form>
+      <form method="post" action="/api/logout" style="display:inline">
+        <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
+        <button class="btn sm" type="submit">Logout</button>
+      </form>
+    </div>
+  </header>
+  <div class="alert {{ alert_cls }}">▲ {{ alert_text }} <span class="src">— safety {{ snap.safety.overall if snap else 'UNKNOWN' }} · LST {{ lst_hms|default('—') }}</span></div>
+  <nav class="topnav">
+    <a href="/app/control" class="{% if active=='control' %}on{% endif %}">CONTROL</a>
+    <a href="/app/observations" class="{% if active=='observations' %}on{% endif %}">OBSERVATIONS</a>
+    <a href="/app/camera" class="{% if active=='camera' %}on{% endif %}">CAMERA</a>
+    <a href="/app/system" class="{% if active=='system' %}on{% endif %}">SYSTEM</a>
+    {% if role=='admin' %}<a href="/app/admin" class="{% if active=='admin' %}on{% endif %}">ADMIN</a>{% endif %}
+  </nav>
+  <main class="ws">{% block body %}{% endblock %}</main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

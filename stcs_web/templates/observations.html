@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="panel"><div class="panel-body" style="padding:6px 12px">
+  <div class="row" style="gap:22px">
+    <span class="note">ARCHIVE</span>
+    <span><b style="font-family:var(--mono);font-size:15px">{{ summary.total }}</b> <span class="note">observations</span></span>
+    <span><b style="font-family:var(--mono);font-size:15px">{{ summary.hours }}</b> <span class="note">hours</span></span>
+    <span><b style="font-family:var(--mono);font-size:15px">{{ summary.targets }}</b> <span class="note">targets</span></span>
+    <span class="note">Latest: <b style="font-family:var(--mono)">{{ summary.latest }}</b></span>
+    <span style="margin-left:auto"></span>
+    <a class="btn sm" href="/api/history/export?fmt=csv">CSV</a>
+    <a class="btn sm" href="/api/history/export?fmt=xlsx">Excel</a>
+    <a class="btn sm" href="/api/history/export?fmt=pdf">PDF</a>
+  </div>
+</div></div>
+<div class="grid" style="grid-template-columns:250px minmax(0,1fr)">
+  <div class="panel"><h3>Find</h3><div class="panel-body">
+    <form method="get" action="/app/observations">
+    <label class="f">Target / notes</label><input name="q" value="{{ q }}">
+    <label class="f">Status</label><input name="status" value="{{ status_f }}" placeholder="completed">
+    <label class="f">From</label><input name="from" value="{{ date_from }}" placeholder="YYYY-MM-DD">
+    <label class="f">To</label><input name="to" value="{{ date_to }}" placeholder="YYYY-MM-DD">
+    {% if role=='admin' %}<label class="f">Observer</label><input name="owner" value="{{ owner_filter }}" placeholder="Scientist1">{% endif %}
+    <div class="row mt"><button class="btn sm primary" type="submit">Search</button></div>
+    <div class="row mt"><a class="btn sm" href="/app/observations?from={{ today }}">Today</a>
+    <a class="btn sm" href="/app/observations?from={{ week_ago }}">7 days</a>
+    <a class="btn sm" href="/app/observations?from={{ month_ago }}">30 days</a></div></form>
+    <p class="note mt">You see only your own observations{% if role=='admin' %}; use Observer to review a scientist's authorized records{% endif %}.</p>
+  </div></div>
+  <div class="panel"><h3>{% if detail %}Observation record{% else %}Observations · page {{ page }} · total {{ total }}{% endif %}</h3><div class="panel-body scroll">
+    {% if not db_ok %}<div class="err">Archive database is down — recorded observations will appear here once PostgreSQL is connected.</div>{% endif %}
+    {% if detail %}
+    <dl class="kv" style="max-width:560px">
+      <dt>Target</dt><dd>{{ detail.target }}</dd><dt>Observer</dt><dd>{{ detail.owner }}</dd>
+      <dt>Start</dt><dd>{{ detail.start }}</dd><dt>End</dt><dd>{{ detail.end }}</dd>
+      <dt>Duration</dt><dd>{{ detail.duration_s }} s</dd><dt>Status</dt><dd>{{ detail.status }}</dd>
+      <dt>RA / DEC</dt><dd>{{ detail.ra_deg }} / {{ detail.dec_deg }}</dd>
+    </dl>
+    <h3 style="margin:10px 0 4px;font-size:10px;letter-spacing:.12em;color:var(--dim)">EVENT TIMELINE</h3>
+    <table class="t"><tr><th>Time</th><th>Event</th></tr>
+      {% if detail.start %}<tr><td>{{ detail.start }}</td><td>Observation started</td></tr>{% endif %}
+      {% if detail.end %}<tr><td>{{ detail.end }}</td><td>Observation {{ detail.status }}</td></tr>{% endif %}
+      {% for f in detail.files %}<tr><td>—</td><td>File recorded: {{ f.filename }} ({{ f.kind }})</td></tr>{% endfor %}
+    </table>
+    <h3 style="margin:10px 0 4px;font-size:10px;letter-spacing:.12em;color:var(--dim)">FILES ({{ detail.files|length }})</h3>
+    <table class="t"><tr><th>Name</th><th>Kind</th></tr>
+    {% for f in detail.files %}<tr><td>{{ f.filename }}</td><td>{{ f.kind }}</td></tr>{% endfor %}
+    </table>
+    {% if not detail.files %}<p class="note">No files attached to this record.</p>{% endif %}
+    <div class="row mt"><a class="btn sm" href="/app/observations">← Back to list</a></div>
+    {% else %}
+    <table class="t"><tr><th>Date</th><th>Target</th><th>RA°</th><th>DEC°</th><th>Duration</th><th>Status</th><th>Observer</th></tr>
+    {% for o in items %}<tr><td><a href="/app/observations?obs={{ o.id }}">{{ o.start }}</a></td><td>{{ o.target }}</td><td>{{ o.ra_deg }}</td><td>{{ o.dec_deg }}</td><td>{{ o.duration_s }}</td><td>{{ o.status }}</td><td>{{ o.owner }}</td></tr>{% endfor %}
+    </table>
+    {% if not items %}<p class="note mt">No records match. Adjust the search or connect the archive database.</p>{% endif %}
+    <div class="row mt">
+      {% if page>1 %}<a class="btn sm" href="/app/observations?page={{ page-1 }}">← Prev</a>{% endif %}
+      <a class="btn sm" href="/app/observations?page={{ page+1 }}">Next →</a></div>
+    {% endif %}
+  </div></div>
+</div>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="subtabs"><button class="on" data-subtab="u">USERS</button><button data-subtab="o">OBSERVATIONS</button><button data-subtab="a">AUDIT</button></div>
+<div data-pane="u"><div class="panel"><h3>Users <span class="tag">{{ users|length }} accounts · passwords never displayed</span></h3><div class="panel-body scroll">
+  <table class="t"><tr><th>Username</th><th>Role</th><th>Active</th></tr>
+  {% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.role|title }}</td><td>{{ 'Yes' if u.is_active else 'No' }}</td></tr>{% endfor %}
+  </table></div></div></div>
+<div data-pane="o" style="display:none"><div class="panel"><h3>All authorized observations <span class="tag">{{ items|length }} shown</span></h3><div class="panel-body scroll">
+  <table class="t"><tr><th>ID</th><th>Owner</th><th>Target</th><th>Start</th><th>Status</th></tr>
+  {% for o in items %}<tr><td><a href="/app/observations?obs={{ o.id }}">{{ o.id }}</a></td><td>{{ o.owner }}</td><td>{{ o.target }}</td><td>{{ o.start }}</td><td>{{ o.status }}</td></tr>{% endfor %}
+  </table>{% if not items %}<p class="note mt">No records — the archive database may be down.</p>{% endif %}</div></div></div>
+<div data-pane="a" style="display:none"><div class="panel"><h3>Audit trail <span class="tag">latest {{ audit|length }}</span></h3><div class="panel-body scroll">
+  <table class="t"><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
+  {% for e in audit %}<tr><td>{{ e[3] }}</td><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td></tr>{% endfor %}
+  </table>{% if not audit %}<p class="note mt">No audit records yet.</p>{% endif %}</div></div></div>
+{% endblock %}

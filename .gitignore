@@ -1,0 +1,87 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# Development credentials
+*_creds.txt
+fallback_creds.txt
+
+# =========================
+# IDE / editors
+# =========================
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# =========================
+# Testing
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# =========================
+# Build / packaging
+# =========================
+build/
+*.egg-info/
+dist/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Node
+# =========================
+node_modules/
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# =========================
+# Database/local runtime
+# =========================
+*.sqlite
+*.sqlite3
+
+# =========================
+# Generated runtime files
+# =========================
+runtime/
+data/
+uploads/

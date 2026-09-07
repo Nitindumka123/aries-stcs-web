@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="console cols3">
+  <!-- ===== COLUMN 1: position + tracking ===== -->
+  <div class="col">
+    <div class="sec"><h3>Mount position <span class="tag"><span data-live="alpaca">{{ snap.alpaca.status|disp }}</span> · {{ alp_age }} ago</span></h3><div class="sec-body">
+      <div class="tstrip r2">
+        <div class="tele hero"><div class="k">RIGHT ASCENSION</div><div class="v" data-live="ra">{{ ra_hms }}</div><div class="s">HH:MM:SS</div></div>
+        <div class="tele hero"><div class="k">DECLINATION</div><div class="v" data-live="dec">{{ dec_dms }}</div><div class="s">±DD°MM′SS″</div></div>
+      </div>
+      <div class="tstrip r3 mt">
+        <div class="tele"><div class="k">HOUR ANGLE</div><div class="v" style="font-size:15px" data-live="hra">{{ hra_hms }}</div></div>
+        <div class="tele"><div class="k">AZIMUTH</div><div class="v" style="font-size:15px" data-live="az">{{ az }}</div></div>
+        <div class="tele"><div class="k">ALTITUDE</div><div class="v" style="font-size:15px" data-live="alt">{{ alt }}</div></div>
+        <div class="tele"><div class="k">LST · {{ snap.lst_source }}</div><div class="v" style="font-size:15px" data-live="lst">{{ lst_hms }}</div></div>
+        <div class="tele"><div class="k">JULIAN DATE</div><div class="v" style="font-size:13px">{{ jd }}</div></div>
+        <div class="tele"><div class="k">MOUNT STATE</div><div class="v st {{ 'warn' if motion_state!='IDLE' else 'ok' }}" style="font-size:15px" data-live="motion">{{ motion_state }}</div></div>
+      </div>
+    </div></div>
+    <div class="sec"><h3>Tracking <span class="tag st {{ 'ok' if tracking=='ON' else 'dim' }}" data-live="tracking">{{ 'TRACKING' if tracking=='ON' else 'NOT TRACKING' }}</span></h3><div class="sec-body">
+      <div class="row">
+        <form method="post" action="/api/command/validate" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="tracking_on"><button class="btn primary" type="submit">Track ON</button></form>
+        <form method="post" action="/api/command/validate" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="tracking_off"><button class="btn" type="submit">Track OFF</button></form>
+        <span class="note">Sidereal drive: {{ sidereal }} · rate 0.004178074 °/s</span>
+      </div>
+    </div></div>
+  </div>
+  <!-- ===== COLUMN 2: motion + target ===== -->
+  <div class="col">
+    <div class="sec"><h3>Manual motion <span class="tag">{{ motion_state }}</span></h3><div class="sec-body">
+      <div class="dpad" role="group" aria-label="Telescope direction pad">
+        <span></span><button disabled title="Move north (DEC+)">▲<br><span style="font-size:9px">N</span></button><span></span>
+        <button disabled title="Move west">◀<br><span style="font-size:9px">W</span></button><div class="mid">HOLD<br>TO<br>MOVE</div><button disabled title="Move east">▶<br><span style="font-size:9px">E</span></button>
+        <span></span><button disabled title="Move south (DEC−)">▼<br><span style="font-size:9px">S</span></button><span></span>
+      </div>
+      <label class="f">RA speed</label>
+      <div class="seg" role="group" aria-label="RA speed">{% for s in ["COARSE","FINE 1","FINE 2"] %}<button disabled title="RA {{ s }}">{{ s }}</button>{% endfor %}</div>
+      <label class="f">DEC speed</label>
+      <div class="seg" role="group" aria-label="DEC speed">{% for s in ["COARSE","FINE 1","FINE 2"] %}<button disabled title="DEC {{ s }}">{{ s }}</button>{% endfor %}</div>
+    </div></div>
+    <div class="sec"><h3>Target</h3><div class="sec-body">
+      <form method="post" action="/api/command/validate" onsubmit="return confirm('Slew to this target?');">
+        <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="command" value="slewtocoordinatesasync">
+        <div class="row"><div style="flex:1"><label class="f">Target RA °</label><input name="ra_deg" placeholder="189.20"></div>
+        <div style="flex:1"><label class="f">Target DEC °</label><input name="dec_deg" placeholder="27.30"></div></div>
+        <div class="row mt">
+          <button class="btn primary" style="flex:1.4" type="submit">Go To Target</button>
+        </div>
+      </form>
+      <form method="post" action="/api/command/validate" class="mt" onsubmit="return confirm('Park the telescope?');">
+        <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="command" value="park">
+        <button class="btn block" type="submit">Park Telescope</button>
+      </form>
+      {% if cmd_result %}<p class="note mt">{{ cmd_result }}</p>{% endif %}
+    </div></div>
+  </div>
+  <!-- ===== COLUMN 3: dome + observatory state + calibration ===== -->
+  <div class="col">
+    <div class="sec"><h3>Dome <span class="tag">{{ dome_state }}</span></h3><div class="sec-body">
+      <div class="tstrip r2">
+        <div class="tele"><div class="k">DOME AZIMUTH</div><div class="v">{{ dome_az }}</div><div class="s">degrees</div></div>
+        <div class="tele"><div class="k">SYNC</div><div class="v" style="font-size:14px">{{ dome_sync }}</div></div>
+      </div>
+      <div class="row mt">
+        {% for c,label in [("dome_cw","↻ CW"),("dome_off","■ Stop"),("dome_ccw","↺ CCW")] %}
+        <form method="post" action="/api/command/validate" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="{{ c }}"><button class="btn sm block" type="submit">{{ label }}</button></form>
+        {% endfor %}
+      </div>
+      <div class="row mt">
+        <form method="post" action="/api/command/validate" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="synccalibration"><button class="btn sm block" type="submit">Sync</button></form>
+        <button class="btn sm" style="flex:1" disabled title="Automatic dome tracking follows once enabled">Auto Track Sync</button>
+      </div>
+    </div></div>
+    <div class="sec"><h3>Observatory <span class="tag">{{ snap.weather.status|disp }}{% if wx_age != '—' %} · {{ wx_age }} ago{% endif %}</span></h3><div class="sec-body">
+      <dl class="kv">
+        <dt>Temperature</dt><dd data-live="temp">{{ w_temp }}{% if w_temp != '—' %} °C{% endif %}</dd>
+        <dt>Humidity</dt><dd data-live="hum">{{ w_hum }}{% if w_hum != '—' %} %{% endif %}</dd>
+        <dt>Dew point</dt><dd>{{ w_dew }}{% if w_dew != '—' %} °C{% endif %}</dd>
+        <dt>GPS</dt><dd class="st dim">Not available</dd>
+        <dt>Site</dt><dd>{{ site_lat }}, {{ site_lon }}</dd>
+        <dt>Safety</dt><dd class="st {{ 'ok' if snap.safety.overall=='SAFE' else 'warn' }}" data-live="safety">{{ snap.safety.overall }}</dd>
+      </dl>
+      <div class="row mt">
+        <form method="post" action="/api/command/lock" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn sm block" type="submit" title="Single-operator control ownership, expires after 5 minutes idle">Take Lock</button></form>
+        <form method="post" action="/api/command/unlock" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn sm" type="submit">Release</button></form>
+      </div>
+      <p class="note mt">Lock holder: {{ snap.control_lock.owner or 'none — lock is free' }}</p>
+    </div></div>
+    <details class="cal"><summary>CALIBRATION · HOME / OFFSETS</summary><div class="cbody">
+      <table class="t"><tr><th>Parameter</th><th>Value</th></tr>
+      <tr><td>DEC home</td><td>{{ dec_home }}</td></tr>
+      <tr><td>RA offset</td><td>{{ ra_off }}</td></tr>
+      <tr><td>DEC offset</td><td>{{ dec_off }}</td></tr>
+      <tr><td>Dome offset</td><td>{{ dome_off }}</td></tr></table>
+      <form method="post" action="/api/command/validate" class="mt"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="synccalibration">
+      <label class="f">RA (HMS) / Set RA</label><input name="ra_hms" placeholder="12:42:31.42">
+      <label class="f">DEC (DMS) / Set DEC</label><input name="dec_dms" placeholder="+27:18:42.6">
+      <label class="f">Dome AZ / Set Dome</label><input name="dome_az" placeholder="0.0">
+      <div class="row mt"><button class="btn sm" type="submit">Apply Calibration</button></div></form>
+      <form method="post" action="/api/command/validate" class="mt" onsubmit="return confirm('Clear all offsets?');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="clear_offsets"><button class="btn sm danger" type="submit">Clear Offsets</button></form>
+    </div></details>
+  </div>
+</div>
+{% endblock %}

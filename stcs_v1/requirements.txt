@@ -1,0 +1,15 @@
+PyQt6
+pyserial
+pywin32
+numpy
+astropy
+opencv-python
+pypylon
+pytest
+pythonnet
+python-dotenv
+requests
+pynmea2
+fastapi
+websockets
+uvicorn

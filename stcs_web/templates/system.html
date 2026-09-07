@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="console cols3">
+  <div class="col">
+    <div class="sec"><h3>System health <span class="tag">live matrix</span></h3><div class="sec-body scroll">
+      <table class="t"><tr><th>Subsystem</th><th>Status</th><th>Updated</th></tr>
+      {% for name,st,ts in snap.subsystems %}<tr><td>{{ name }}</td>
+      <td class="st {{ 'ok' if st=='LIVE' else ('warn' if st=='STALE' else 'dim') }}">{{ st|disp }}</td><td>{{ ts|age }}</td></tr>{% endfor %}
+      </table>
+    </div></div>
+    <div class="sec"><h3>Services</h3><div class="sec-body"><dl class="kv">
+      <dt>Alpaca 11111</dt><dd>{{ snap.alpaca.status|disp }}</dd>
+      <dt>Weather UDP</dt><dd>{{ snap.weather.status|disp }}</dd>
+      <dt>Database</dt><dd>{{ "Ready" if db_ok else "Down" }}</dd>
+      <dt>Web app</dt><dd class="st ok">Running</dd>
+      <dt>Altitude limits</dt><dd>{{ alt_floor }}° … {{ alt_max }}°</dd>
+      <dt>Site</dt><dd>{{ site_lat }}, {{ site_lon }}</dd>
+    </dl></div></div>
+  </div>
+  <div class="col">
+    <div class="sec"><h3>Event log <span class="tag">latest {{ audit|length }}</span></h3><div class="sec-body scroll">
+      <table class="t"><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
+      {% for e in audit %}<tr><td>{{ e[3] }}</td><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td></tr>{% endfor %}
+      </table>
+      {% if not audit %}<p class="note mt">No records yet — sign-ins, sign-outs and command requests are recorded here automatically.</p>{% endif %}
+    </div></div>
+  </div>
+  <div class="col">
+    <div class="sec"><h3>Configuration <span class="tag">safe settings</span></h3><div class="sec-body"><dl class="kv">
+      <dt>Mode</dt><dd>{{ snap.mode }}</dd>
+      <dt>Telemetry</dt><dd>Alpaca 11111 · UDP 12344</dd>
+      <dt>Commands</dt><dd>{{ 'Armed' if commands_enabled=='YES' else 'Validation only' }}</dd>
+      <dt>Session</dt><dd>120 min · CSRF on</dd>
+    </dl>
+    <p class="note mt">Connection strings, passwords and secret keys are never displayed here.</p></div></div>
+    <div class="sec"><h3>Diagnostics</h3><div class="sec-body">
+      <dl class="kv"><dt>Mount link</dt><dd>{{ snap.alpaca.status|disp }}</dd>
+      <dt>Weather link</dt><dd>{{ snap.weather.status|disp }}</dd>
+      <dt>Archive DB</dt><dd>{{ "Ready" if db_ok else "Down" }}</dd></dl>
+      <p class="note mt">When a link reports a fault, check cabling, ports and the STCS desktop services before retrying from the web console.</p>
+    </div></div>
+  </div>
+</div>
+{% endblock %}
