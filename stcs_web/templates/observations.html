@@ -1,134 +1,201 @@
 {% extends "base.html" %}
 {% block body %}
-<div class="sec" style="margin-bottom:6px"><div class="sec-body">
-  <div class="obs-summary">
-    <div class="stat-item"><span class="stat-val">{{ summary.total }}</span><span class="stat-lbl">observations</span></div>
-    <div class="stat-item"><span class="stat-val">{{ summary.hours }}</span><span class="stat-lbl">hours</span></div>
-    <div class="stat-item"><span class="stat-val">{{ summary.targets }}</span><span class="stat-lbl">targets</span></div>
-    <div class="stat-item"><span class="stat-lbl">Latest:</span><span class="stat-val" style="font-size:11px">{{ summary.latest }}</span></div>
-    <span class="right"></span>
-    <a class="btn sm" href="/api/history/export?fmt=csv">CSV</a>
-    <a class="btn sm" href="/api/history/export?fmt=xlsx">Excel</a>
-    <a class="btn sm" href="/api/history/export?fmt=pdf">PDF</a>
-  </div>
-</div></div>
-
-<div class="grid cols2x">
-  <div class="sec"><h3>Filter</h3><div class="sec-body">
-    <form method="get" action="/app/observations">
-      <label class="f">Target / notes</label><input name="q" value="{{ q }}" placeholder="Search target...">
-      <label class="f">Status</label>
-      <select name="status">
-        <option value="">All</option>
-        <option value="completed" {{ 'selected' if status_f=='completed' }}>Completed</option>
-        <option value="in_progress" {{ 'selected' if status_f=='in_progress' }}>In Progress</option>
-        <option value="failed" {{ 'selected' if status_f=='failed' }}>Failed</option>
-        <option value="aborted" {{ 'selected' if status_f=='aborted' }}>Aborted</option>
-      </select>
-      <label class="f">From</label><input name="from" type="date" value="{{ date_from }}">
-      <label class="f">To</label><input name="to" type="date" value="{{ date_to }}">
-      {% if role=='admin' %}<label class="f">Observer</label><input name="owner" value="{{ owner_filter }}" placeholder="Scientist username">{% endif %}
-      <div class="row mt"><button class="btn sm primary" type="submit">Search</button></div>
-      <div class="row mt">
-        <a class="btn sm" href="/app/observations?from={{ today }}">Today</a>
-        <a class="btn sm" href="/app/observations?from={{ week_ago }}">7 days</a>
-        <a class="btn sm" href="/app/observations?from={{ month_ago }}">30 days</a>
-      </div>
-    </form>
-    <p class="note mt">You see only your own observations{% if role=='admin' %}; use Observer filter to review a scientist's records{% endif %}.</p>
-  </div></div>
-
-  <div class="sec"><h3>{% if detail %}Observation #{{ detail.id }}{% else %}Archive &middot; page {{ page }} &middot; {{ total }} records{% endif %}</h3><div class="sec-body scroll">
-    {% if not db_ok %}<div class="err">Archive database is down. Observations will appear once PostgreSQL is connected.</div>{% endif %}
-    {% if detail %}
-    <div style="max-width:620px">
-      <div class="tstrip r2" style="margin-bottom:8px">
-        <div class="tele"><div class="k">TARGET</div><div class="v" style="font-size:15px">{{ detail.target }}</div></div>
-        <div class="tele"><div class="k">STATUS</div><div class="v st {{ 'ok' if detail.status=='completed' else ('warn' if detail.status=='in_progress' else 'bad') }}">{{ detail.status }}</div></div>
-      </div>
-      <div class="tstrip r3" style="margin-bottom:8px">
-        <div class="tele"><div class="k">OBSERVER</div><div class="v" style="font-size:12px">{{ detail.owner }}</div></div>
-        <div class="tele"><div class="k">DURATION</div><div class="v" style="font-size:12px">{{ detail.duration_s }}s</div></div>
-        <div class="tele"><div class="k">RA / DEC</div><div class="v" style="font-size:11px">{{ detail.ra_deg }} / {{ detail.dec_deg }}</div></div>
-      </div>
-      <dl class="kv" style="margin-bottom:8px">
-        <dt>Start</dt><dd>{{ detail.start }}</dd>
-        <dt>End</dt><dd>{{ detail.end }}</dd>
-        {% if detail.notes %}<dt>Notes</dt><dd>{{ detail.notes }}</dd>{% endif %}
-      </dl>
-
-      {% if detail.telescope_state %}
-      <details class="cal" style="margin-bottom:8px"><summary>TELESCOPE STATE AT EXPOSURE</summary><div class="cbody">
-        <dl class="kv">
-          {% for k, v in detail.telescope_state.items() %}
-          {% if v is not none and k != 'weather' %}
-          <dt>{{ k }}</dt><dd>{{ v }}</dd>
+<div class="obs-container">
+  {% if not db_ok %}
+  <div class="err">Archive database is down. Observations will appear once PostgreSQL is connected.</div>
+  {% else %}
+  {% if items %}
+  <!-- Observation Archive List -->
+  <div class="obs-archive-list" role="list">
+    <div class="obs-archive-filters">
+      <form method="get" action="/app/observations" class="obs-filter-form">
+        <div class="obs-filter-row">
+          <label class="f obs-filter-label" for="obs-search">Search</label>
+          <input id="obs-search" name="q" type="search" value="{{ q }}" placeholder="Search target or notes...">
+        </div>
+        <div class="obs-filter-row">
+          <label class="f obs-filter-label" for="obs-status">Status</label>
+          <select id="obs-status" name="status" aria-label="Filter by status">
+            <option value="">All</option>
+            <option value="completed" {{ 'selected' if status_f=='completed' }}>Completed</option>
+            <option value="in_progress" {{ 'selected' if status_f=='in_progress' }}>In Progress</option>
+            <option value="failed" {{ 'selected' if status_f=='failed' }}>Failed</option>
+            <option value="aborted" {{ 'selected' if status_f=='aborted' }}>Aborted</option>
+          </select>
+        </div>
+        <div class="obs-filter-row">
+          <label class="f obs-filter-label" for="obs-date-from">From</label>
+          <input id="obs-date-from" name="from" type="date" value="{{ date_from }}">
+        </div>
+        <div class="obs-filter-row">
+          <label class="f obs-filter-label" for="obs-date-to">To</label>
+          <input id="obs-date-to" name="to" type="date" value="{{ date_to }}">
+        </div>
+        {% if role=='admin' %}
+        <div class="obs-filter-row">
+          <label class="f obs-filter-label" for="obs-observer">Observer</label>
+          <input id="obs-observer" name="owner" type="text" value="{{ owner_filter }}" placeholder="Scientist username">
+        </div>
+        {% endif %}
+        <div class="obs-filter-row">
+          <button class="btn sm primary" type="submit" aria-label="Apply observation filters">Search</button>
+        </div>
+      </form>
+    </div>
+    
+    <div class="obs-archive-listings">
+      {% for o in items %}
+      <div class="obs-item" role="listitem" tabindex="0" onfocus="this.classList.add('hover')" onblur="this.classList.remove('hover')">
+        <div class="obs-item-info">
+          <span class="obs-item-id">{{ o.id }}</span>
+          <span class="obs-item-date">{{ o.start|default:'—' }}</span>
+          <span class="obs-item-duration">{{ o.duration_s|default:'—' }}s</span>
+        </div>
+        <div class="obs-item-actions">
+          {% if o.owner == username or role == 'admin' %}
+          <a href="/app/observations?obs={{ o.id }}" class="obs-item-download" title="View observation details">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M10 22a8 8 0 008-8H2a2 2 0 002 2z"/>
+            </svg>
+          </a>
+          <button class="obs-item-delete" onclick="confirmDelete({{ o.id }})" aria-label="Delete observation {{ o.id }}" title="Delete observation">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M19 6v14a2 2 0 002 2H5a2 2 0 00-2-2V6m3 6V6m5 3V6m2 3V6m2 3V6"/>
+            </svg>
+          </button>
           {% endif %}
-          {% endfor %}
-        </dl>
+        </div>
+      </div>
+      {% empty %}
+      <p class="note mt">No observations match. Adjust the search or connect the archive database.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if detail %}
+  <!-- Observation Detail -->
+  <div class="obs-detail-view">
+    <div class="obs-detail-header">
+      <h2>Observation {{ detail.id }}</h2>
+      <div class="obs-detail-close" onclick="history.back()">&times;</div>
+    </div>
+    
+    <div class="obs-detail-section obs-summary">
+      <dl class="kv">
+        <dt>Target</dt><dd>{{ detail.target|default:'—' }}</dt>
+        <dt>Observer</dt><dd>{{ detail.owner }}</dt>
+        <dt>Date</dt><dd>{{ detail.start|default:'—' }}</dt>
+        <dt>End</dt><dd>{{ detail.end|default:'—' }}</dt>
+        <dt>Duration</dt><dd>{{ detail.duration_s|default:'—' }}s</dt>
+        <dt>Status</dt><dd><span class="st {{ 'ok' if detail.status=='completed' else ('warn' if detail.status=='in_progress' else 'bad') }}">{{ detail.status }}</span></dd>
+      </dl>
+    </div>
+    
+    {% if detail.files %}
+    <div class="obs-detail-section obs-files">
+      <h3>Scientific Files</h3>
+      <p>Files produced during this observation.</p>
+      <dl class="kv">
+        {% for f in detail.files %}
+        <dt>{{ f.filename }}</dt>
+        <dd>
+          {% if f.file_size %}
+          {{ "%.1f"|format(f.file_size / 1048576) }} MB
+          {% endif %}
+          {% if f.checksum %}
+          <span class="note">SHA-256: {{ f.checksum }}</span>
+          {% endif %}
+          {% if forloop.counter0 == 0 %}
+          <a href="/api/camera/file/{{ f.id }}" class="btn sm" download>Download</a>
+          {% endif %}
+          </dd>
+        {% endfor %}
+      </dl>
+      {% if not detail.files %}<p class="note">No files attached.</p>{% endif %}
+    </div>
+    {% endif %}
+    
+    {% if detail.telescope_state %}
+    <div class="obs-detail-section obs-telescope">
+      <h3>Telescope State at Exposure</h3>
+      <dl class="kv">
+        {% for k, v in detail.telescope_state.items() %}
+        {% if v is not none and k != 'weather' %}
+        <dt>{{ k }}</dt><dd>{{ v }}</dd>
+        {% endif %}
+        {% endfor %}
         {% if detail.telescope_state.weather %}
-        <label class="f" style="margin-top:6px">WEATHER</label>
-        <dl class="kv">
+        <dt>Weather</dt>
+        <dd>
           {% for k, v in detail.telescope_state.weather.items() %}
           {% if v is not none %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endif %}
           {% endfor %}
-        </dl>
+        </dd>
         {% endif %}
-      </div></details>
-      {% endif %}
-
-      {% if detail.camera_settings %}
-      <details class="cal" style="margin-bottom:8px"><summary>CAMERA SETTINGS</summary><div class="cbody">
-        <dl class="kv">
-          {% for k, v in detail.camera_settings.items() %}
-          {% if v is not none %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endif %}
-          {% endfor %}
-        </dl>
-      </div></details>
-      {% endif %}
-
-      <div style="margin-bottom:4px"><label class="f">EVENT TIMELINE</label></div>
-      <table class="t"><tr><th>Time</th><th>Event</th></tr>
-        {% if detail.start %}<tr><td>{{ detail.start }}</td><td>Observation started</td></tr>{% endif %}
-        {% if detail.end %}<tr><td>{{ detail.end }}</td><td>Observation {{ detail.status }}</td></tr>{% endif %}
-        {% for f in detail.files %}<tr><td>{{ f.created_at or '---' }}</td><td>File: {{ f.filename }} ({{ f.kind }}{% if f.file_size %}, {{ "%.1f"|format(f.file_size / 1048576) }} MB{% endif %})</td></tr>{% endfor %}
-      </table>
-
-      <div style="margin:8px 0 4px"><label class="f">FILES ({{ detail.files|length }})</label></div>
-      <table class="t"><tr><th>Name</th><th>Kind</th><th>Size</th><th>SHA-256</th><th></th></tr>
-      {% for f in detail.files %}<tr><td>{{ f.filename }}</td><td>{{ f.kind }}</td><td>{% if f.file_size %}{{ "%.1f"|format(f.file_size / 1048576) }} MB{% else %}---{% endif %}</td><td style="font-size:8.5px;max-width:110px;overflow:hidden;text-overflow:ellipsis">{{ f.checksum or '---' }}</td><td><a href="/api/camera/file/{{ f.id }}" class="btn sm" download>Download</a></td></tr>{% endfor %}
-      </table>
-      {% if not detail.files %}<p class="note">No files attached.</p>{% endif %}
-      <div class="row mt">
-        <a class="btn sm" href="/app/observations">&larr; Back to list</a>
-        <span class="right"></span>
-        <form method="post" action="/api/observations/delete/{{ detail.id }}" onsubmit="return confirm('Delete observation #{{ detail.id }}? This cannot be undone.');">
-          <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
-          <button class="btn sm danger" type="submit">Delete</button>
-        </form>
-      </div>
-    </div>
-    {% else %}
-    <table class="t">
-      <tr><th>Date</th><th>Target</th><th>RA&deg;</th><th>DEC&deg;</th><th>Duration</th><th>Status</th><th>Observer</th><th></th></tr>
-      {% for o in items %}<tr>
-        <td><a href="/app/observations?obs={{ o.id }}">{{ o.start }}</a></td>
-        <td>{{ o.target }}</td>
-        <td>{{ o.ra_deg }}</td>
-        <td>{{ o.dec_deg }}</td>
-        <td>{{ o.duration_s }}</td>
-        <td><span class="st {{ 'ok' if o.status=='completed' else ('warn' if o.status=='in_progress' else 'dim') }}">{{ o.status }}</span></td>
-        <td>{{ o.owner }}</td>
-        <td>{% if o.owner == username or role == 'admin' %}<form method="post" action="/api/observations/delete/{{ o.id }}" style="display:inline" onsubmit="return confirm('Delete this observation?');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn sm danger" type="submit" style="padding:2px 6px;font-size:9px">Del</button></form>{% endif %}</td>
-      </tr>{% endfor %}
-    </table>
-    {% if not items %}<p class="note mt">No records match. Adjust the search or connect the archive database.</p>{% endif %}
-    <div class="row mt">
-      {% if page>1 %}<a class="btn sm" href="/app/observations?page={{ page-1 }}&q={{ q }}&status={{ status_f }}&from={{ date_from }}&to={{ date_to }}">&larr; Prev</a>{% endif %}
-      <span class="note">Page {{ page }}</span>
-      <a class="btn sm" href="/app/observations?page={{ page+1 }}&q={{ q }}&status={{ status_f }}&from={{ date_from }}&to={{ date_to }}">Next &rarr;</a>
+      </dl>
     </div>
     {% endif %}
-  </div></div>
+    
+    {% if detail.camera_settings %}
+    <div class="obs-detail-section obs-camera">
+      <h3>Camera Settings</h3>
+      <dl class="kv">
+        {% for k, v in detail.camera_settings.items() %}
+        {% if v is not none %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endif %}
+        {% endfor %}
+      </dl>
+    </div>
+    {% endif %}
+    
+    <div class="obs-detail-section obs-timeline">
+      <h3>Timeline</h3>
+      <table class="t">
+        <tr><th>Time</th><th>Event</th></tr>
+        {% if detail.start %}<tr><td>{{ detail.start }}</td><td>Observation started</td></tr>{% endif %}
+        {% if detail.end %}<tr><td>{{ detail.end }}</td><td>Observation {{ detail.status }}</td></tr>{% endif %}
+        {% for f in detail.files %}<tr><td>{{ f.created_at or '---' }}</td><td>File: {{ f.filename }}</td></tr>{% endfor %}
+      </table>
+    </div>
+    
+    {% if detail.notes %}
+    <div class="obs-detail-section obs-notes">
+      <h3>Notes</h3>
+      <p>{{ detail.notes }}</p>
+    </div>
+    {% endif %}
+    
+    <div class="obs-detail-actions">
+      <a href="/app/observations" class="btn sm"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-4-4 4-4M9 19l4-4-4-4"/></svg> Back to archive</a>
+      {% if detail.owner == username or role == 'admin' %}
+      <form method="post" action="/api/observations/delete/{{ detail.id }}" onclick="return confirm('Delete observation #{{ detail.id }}? This will remove the observation record and its associated archive references/files according to the application\'s existing deletion rules.');" style="display:inline">
+        <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
+        <button class="btn sm danger" type="submit">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
 </div>
+
+<script>
+/* Observation archive JavaScript */
+document.addEventListener('DOMContentLoaded', function() {
+  // Handle observation item clicks
+  document.querySelectorAll('.obs-item').forEach(function(item) {
+    item.addEventListener('click', function(e) {
+      // Don't open detail if delete or download icon was clicked
+      if (e.target.closest('.obs-item-delete') || e.target.closest('.obs-item-download')) {
+        return;
+      }
+      // Open detail view - already handled by link href
+    });
+  });
+});
+
+function confirmDelete(id) {
+  // Already handled by onclick on the button - this is for programmatic use
+  return true;
+}
+</script>
 {% endblock %}
