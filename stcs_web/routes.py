@@ -12,8 +12,16 @@ from .auth import (
     require_scientist,
 )
 from .database import create_user, get_db_connection, get_user_by_username
+from .command_service import get_command_service, CommandStatus
+from . import command_defs
+from .rate_limit import is_rate_limited, login_rate_limiter, command_rate_limiter, export_rate_limiter
 
 router = APIRouter(prefix="/api", tags=["api"])
+
+
+def _get_templates(request: Request):
+    """Get Jinja2Templates from app state."""
+    return request.app.state.templates
 
 
 # ── CSRF helper ───────────────────────────────────────────────────────────
@@ -60,7 +68,8 @@ def template_response(name: str, request: Request, **context) -> HTMLResponse:
     NOTE: installed Starlette 1.6.0 uses TemplateResponse(request, name,
     context) — request first. Verified against this environment.
     """
-    return auth.templates.TemplateResponse(request, name, context)
+    templates = _get_templates(request)
+    return templates.TemplateResponse(request, name, context)
 
 
 # ── Login route ─────────────────────────────────────────────────────────
@@ -79,13 +88,19 @@ async def login_get(request: Request):
 @router.post("/login", include_in_schema=False)
 async def login_post(request: Request, response: Response):
     """Process login form submission."""
+    # Rate limiting for login attempts
+    ip_key = f"ip:{request.client.host}" if request.client else "unknown"
+    if is_rate_limited(ip_key, login_rate_limiter):
+        # Small delay to avoid timing attacks, then generic error
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+    
     form_data = await request.form()
     username = form_data.get("username", "")
     password = form_data.get("password", "")
     
     user = authenticate_user(username, password)
     if user is None:
-        # Re-show login with error (fresh CSRF token so retry works)
+        # Record the failed attempt and re-show login with error
         return template_response(
             "login.html",
             request,
@@ -215,3 +230,274 @@ async def list_users(request: Request):
             }
         )
     return {"users": users}
+
+
+# ── Telescope Command Endpoints ──────────────────────────────────────────
+# These endpoints route commands through the CommandService which validates,
+# checks safety, and forwards to the STCS V1 control layer via WebSocket.
+
+def _get_current_user_or_401(request: Request):
+    """Get current user or raise 401."""
+    user = auth.get_current_user(request)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return user
+
+
+def _validate_csrf_or_403(form_data, request: Request):
+    """Validate CSRF token or raise 403."""
+    if not _csrf_validate_form(form_data, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
+
+
+def _command_response(result):
+    """Convert CommandService result to standardized JSON response."""
+    return {
+        "status": result.status.value,
+        "command": result.command,
+        "message": result.message,
+        "executed": result.executed,
+        "reason": result.reason,
+        "details": result.details,
+        "timestamp": result.timestamp,
+    }
+
+
+@router.post("/command/manual", include_in_schema=False)
+async def command_manual(request: Request):
+    """Manual RA/DEC jog command (held signal)."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    svc = get_command_service()
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command="manual_move",
+        fields={
+            "axis": form_data.get("axis", "").upper(),
+            "direction": form_data.get("direction", "").upper(),
+            "speed": form_data.get("speed", "").upper(),
+        }
+    )
+    return _command_response(result)
+
+
+@router.post("/command/stop", include_in_schema=False)
+async def command_stop(request: Request):
+    """Emergency stop all motion."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    svc = get_command_service()
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command="stop",
+        fields={}
+    )
+    return _command_response(result)
+
+
+@router.post("/command/tracking", include_in_schema=False)
+async def command_tracking(request: Request):
+    """Tracking ON/OFF command."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    action = form_data.get("action", "").lower()  # "on" or "off"
+    if action not in ("on", "off"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action must be 'on' or 'off'")
+    
+    svc = get_command_service()
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command="tracking_on" if action == "on" else "tracking_off",
+        fields={}
+    )
+    return _command_response(result)
+
+
+@router.post("/command/dome", include_in_schema=False)
+async def command_dome(request: Request):
+    """Dome CW/CCW/OFF command."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    action = form_data.get("action", "").upper()  # "CW", "CCW", "OFF"
+    if action not in ("CW", "CCW", "OFF"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action must be CW, CCW, or OFF")
+    
+    cmd_map = {"CW": "dome_cw", "CCW": "dome_ccw", "OFF": "dome_off"}
+    
+    svc = get_command_service()
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command=cmd_map[action],
+        fields={}
+    )
+    return _command_response(result)
+
+
+@router.post("/command/slew", include_in_schema=False)
+async def command_slew(request: Request):
+    """Go-To slew command (requires control lock)."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    # Check control lock for slew commands
+    svc = get_command_service()
+    lock = svc.get_control_lock_status()
+    if lock["owner"] and lock["owner"] != user["username"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Control lock held by {lock['owner']} — acquire it first"
+        )
+    
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command="slewtocoordinatesasync",
+        fields={
+            "ra_deg": float(form_data.get("ra_deg", 0)),
+            "dec_deg": float(form_data.get("dec_deg", 0)),
+        }
+    )
+    return _command_response(result)
+
+
+@router.post("/command/park", include_in_schema=False)
+async def command_park(request: Request):
+    """Park telescope at home position (requires control lock)."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    svc = get_command_service()
+    lock = svc.get_control_lock_status()
+    if lock["owner"] and lock["owner"] != user["username"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Control lock held by {lock['owner']} — acquire it first"
+        )
+    
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command="park",
+        fields={}
+    )
+    return _command_response(result)
+
+
+@router.post("/command/calibration", include_in_schema=False)
+async def command_calibration(request: Request):
+    """Calibration commands (sync, clear offsets) - requires control lock."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    action = form_data.get("action", "").lower()  # "sync", "clear_offsets"
+    if action not in ("sync", "clear_offsets"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action must be 'sync' or 'clear_offsets'")
+    
+    svc = get_command_service()
+    lock = svc.get_control_lock_status()
+    if lock["owner"] and lock["owner"] != user["username"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Control lock held by {lock['owner']} — acquire it first"
+        )
+    
+    cmd_map = {"sync": "synccalibration", "clear_offsets": "clear_offsets"}
+    
+    # Pass sync parameters if provided
+    fields = {}
+    if action == "sync":
+        ra_hms = form_data.get("ra_hms", "").strip()
+        dec_dms = form_data.get("dec_dms", "").strip()
+        dome_az = form_data.get("dome_az", "").strip()
+        if ra_hms:
+            fields["ra_hms"] = ra_hms
+        if dec_dms:
+            fields["dec_dms"] = dec_dms
+        if dome_az:
+            fields["dome_az"] = dome_az
+    
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command=cmd_map[action],
+        fields=fields
+    )
+    return _command_response(result)
+
+
+@router.post("/command/emergency-stop", include_in_schema=False)
+async def command_emergency_stop(request: Request):
+    """Emergency stop - highest priority, always allowed for authenticated users."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    svc = get_command_service()
+    result = svc.execute(
+        username=user["username"],
+        role=user["role"],
+        command="emergency_stop",
+        fields={}
+    )
+    return _command_response(result)
+
+
+@router.get("/command/lock/status", include_in_schema=False)
+async def command_lock_status(request: Request):
+    """Get current control lock status."""
+    user = _get_current_user_or_401(request)
+    svc = get_command_service()
+    return svc.get_control_lock_status()
+
+
+@router.post("/command/lock/acquire", include_in_schema=False)
+async def command_lock_acquire(request: Request):
+    """Acquire control lock for slew/calibration commands."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    svc = get_command_service()
+    ok, reason = svc.acquire_control_lock(user["username"])
+    return {"ok": ok, "reason": reason}
+
+
+@router.post("/command/lock/release", include_in_schema=False)
+async def command_lock_release(request: Request):
+    """Release control lock."""
+    user = _get_current_user_or_401(request)
+    form_data = await request.form()
+    _validate_csrf_or_403(form_data, request)
+    
+    svc = get_command_service()
+    ok = svc.release_control_lock(user["username"], user["role"])
+    return {"ok": ok}
+
+
+@router.get("/command/status", include_in_schema=False)
+async def command_status(request: Request):
+    """Get command service status (enabled/disabled)."""
+    user = _get_current_user_or_401(request)
+    svc = get_command_service()
+    client = svc.client
+    return {
+        "commands_enabled": svc.commands_enabled,
+        "stcs_connected": client.is_connected,
+        "client_stats": client.get_stats(),
+        "control_lock": svc.get_control_lock_status(),
+    }

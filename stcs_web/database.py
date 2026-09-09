@@ -3,13 +3,8 @@ import os
 import sys
 from datetime import datetime, timezone
 
-# Ensure bcrypt is available; fall back to SHA256+SALT if not
-try:
-    import psycopg2
-    from psycopg2 import sql
-except ImportError:
-    import psycopg2
-    from psycopg2 import sql
+import psycopg2
+from psycopg2 import sql
 
 
 def get_db_connection():
@@ -131,39 +126,59 @@ def get_user_by_username(username: str) -> dict | None:
                 )
                 row = cur.fetchone()
                 if row is None:
-                    return None
-                return {
-                    "id": row[0],
-                    "username": row[1],
-                    "password_hash": row[2],
-                    "role": row[3],
-                    "is_active": row[4],
-                    "created_at": row[5],
-                    "updated_at": row[6],
-                }
+                    # User not found in PostgreSQL
+                    # Fall back to file-based credentials ONLY if explicitly enabled as development emergency
+                    _fallback_enabled = os.environ.get("DEVELOPMENT_MODE", "").lower() == "true"
+                    conn.close()
+                    if not _fallback_enabled:
+                        return None  # Fail safely in production
+                    # Fall back to file-based development credentials
+                    for entry in _read_fallback_users():
+                        if entry["username"] == username:
+                            return {
+                                "id": entry["id"],
+                                "username": entry["username"],
+                                "password_hash": entry["password_hash"],
+                                "role": entry["role"],
+                                "is_active": True,
+                                "created_at": None,
+                                "updated_at": None,
+                            }
+                    return None  # Not found in fallback either
+                else:
+                    conn.close()
+                    return {
+                        "id": row[0],
+                        "username": row[1],
+                        "password_hash": row[2],
+                        "role": row[3],
+                        "is_active": row[4],
+                        "created_at": row[5],
+                        "updated_at": row[6],
+                    }
         finally:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
     except (psycopg2.OperationalError, psycopg2.InterfaceError, Exception):
-        # Database not available - fall back to file-based credentials
-        pass
-    
-    # Fall back to file-based development credentials.
-    # WHY positional ids: the file has no numeric id column, so each line's
-    # index is its stable fallback id. Every user gets a DISTINCT id —
-    # otherwise a scientist session (id 0) would resolve to the admin record.
-    for entry in _read_fallback_users():
-        if entry["username"] == username:
-            return {
-                "id": entry["id"],
-                "username": entry["username"],
-                "password_hash": entry["password_hash"],
-                "role": entry["role"],
-                "is_active": True,
-                "created_at": None,
-                "updated_at": None,
-            }
-    
-    return None
+        # Database unavailable - fall back only if explicitly enabled as development emergency
+        _fallback_enabled = os.environ.get("DEVELOPMENT_MODE", "").lower() == "true"
+        if not _fallback_enabled:
+            return None  # Fail safely in production
+        # Fall back to file-based development credentials
+        for entry in _read_fallback_users():
+            if entry["username"] == username:
+                return {
+                    "id": entry["id"],
+                    "username": entry["username"],
+                    "password_hash": entry["password_hash"],
+                    "role": entry["role"],
+                    "is_active": True,
+                    "created_at": None,
+                    "updated_at": None,
+                }
+        return None
 
 
 def _read_fallback_users():

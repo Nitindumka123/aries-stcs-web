@@ -2,43 +2,92 @@
 {% block body %}
 <div class="console cols3">
   <div class="col">
-    <div class="sec"><h3>System health <span class="tag">live matrix</span></h3><div class="sec-body scroll">
+    <div class="sec"><h3>Subsystem Health <span class="tag">live matrix</span></h3><div class="sec-body scroll">
       <table class="t"><tr><th>Subsystem</th><th>Status</th><th>Updated</th></tr>
-      {% for name,st,ts in snap.subsystems %}<tr><td>{{ name }}</td>
-      <td class="st {{ 'ok' if st=='LIVE' else ('warn' if st=='STALE' else 'dim') }}">{{ st|disp }}</td><td>{{ ts|age }}</td></tr>{% endfor %}
+        {% for name,st,ts in snap.subsystems %}<tr>
+          <td>{{ name }}</td>
+          <td class="st {{ 'ok' if st=='LIVE' else ('warn' if st=='STALE' else 'dim') }}">{{ st|disp }}</td>
+          <td>{{ ts|age }}</td>
+        </tr>{% endfor %}
       </table>
     </div></div>
     <div class="sec"><h3>Services</h3><div class="sec-body"><dl class="kv">
       <dt>Alpaca 11111</dt><dd>{{ snap.alpaca.status|disp }}</dd>
-      <dt>Weather UDP</dt><dd>{{ snap.weather.status|disp }}</dd>
+      <dt>Weather WS</dt><dd>{{ snap.weather.status|disp }}</dd>
       <dt>Database</dt><dd>{{ "Ready" if db_ok else "Down" }}</dd>
       <dt>Web app</dt><dd class="st ok">Running</dd>
-      <dt>Altitude limits</dt><dd>{{ alt_floor }}° … {{ alt_max }}°</dd>
-      <dt>Site</dt><dd>{{ site_lat }}, {{ site_lon }}</dd>
+      <dt>Altitude limits</dt><dd>{{ alt_floor }}&deg; ... {{ alt_max }}&deg;</dd>
+      <dt>Site</dt><dd>{{ site_lat }}, {{ site_lon }} &middot; ARIES Manora Peak</dd>
     </dl></div></div>
   </div>
   <div class="col">
-    <div class="sec"><h3>Event log <span class="tag">latest {{ audit|length }}</span></h3><div class="sec-body scroll">
-      <table class="t"><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
-      {% for e in audit %}<tr><td>{{ e[3] }}</td><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td></tr>{% endfor %}
-      </table>
-      {% if not audit %}<p class="note mt">No records yet — sign-ins, sign-outs and command requests are recorded here automatically.</p>{% endif %}
+    <div class="sec"><h3>Weather Subsystem <span class="tag {{ 'ok' if env.weather_status=='LIVE' else ('warn' if env.weather_status=='STALE' else 'dim') }}">{{ env.weather_status|default('UNKNOWN') }}</span></h3><div class="sec-body">
+      <dl class="kv">
+        <dt>Source</dt><dd>{{ env.weather_source|default('---') }}</dd>
+        <dt>Protocol</dt><dd class="note">UDP 12344 &rarr; STCS WeatherWorker &rarr; WebSocket 11112</dd>
+        <dt>Connection</dt><dd class="st {{ 'ok' if snap.weather.status=='LIVE' else ('warn' if snap.weather.status=='STALE' else 'dim') }}">{{ snap.weather.status|disp }}</dd>
+        <dt>Data</dt><dd class="st {{ 'ok' if env.weather_status=='LIVE' else ('warn' if env.weather_status=='STALE' else 'dim') }}">{{ env.weather_status|default('UNKNOWN') }}</dd>
+        <dt>Last update</dt><dd>{{ env.weather_age_fmt|default('---') }} ago</dd>
+        <dt>Update age</dt><dd>{{ env.weather_age_s|round(1) }}s</dd>
+      </dl>
+    </div></div>
+    <div class="sec"><h3>Weather Values</h3><div class="sec-body">
+      <dl class="kv">
+        <dt>Temperature</dt><dd>{{ env.temperature|default('---') }}{% if env.temperature is not none %} &deg;C{% endif %}</dd>
+        <dt>Humidity</dt><dd>{{ env.humidity|default('---') }}{% if env.humidity is not none %} %{% endif %}</dd>
+        <dt>Dew point</dt><dd>{{ env.dew_point|default('---') }}{% if env.dew_point is not none %} &deg;C{% endif %}</dd>
+        <dt>Wind</dt><dd>{{ env.wind_speed|default('---') }}{% if env.wind_speed is not none %} km/h{% endif %}</dd>
+        <dt>Rain</dt><dd>{{ 'DETECTED' if env.rain else ('CLEAR' if env.rain is not none else '---') }}</dd>
+      </dl>
+      <div style="margin-top:6px">
+        <label class="f">Fields received</label>
+        <p class="note">{{ env.weather_fields_available|join(', ') }}</p>
+        <label class="f">Unavailable (no hardware)</label>
+        <p class="note">{{ env.weather_fields_unavailable|join(', ') }}</p>
+      </div>
+    </div></div>
+    <div class="sec"><h3>Safety Evaluation <span class="tag st {{ 'ok' if snap.safety.overall=='SAFE' else ('warn' if snap.safety.overall=='WARNING' else 'bad' if snap.safety.overall=='CRITICAL' else 'dim') }}">{{ snap.safety.overall }}</span></h3><div class="sec-body">
+      <dl class="kv">
+        <dt>Humidity</dt><dd class="st {{ 'ok' if env.humidity_state=='SAFE' else ('warn' if env.humidity_state=='WARNING' else 'bad' if env.humidity_state=='CRITICAL' else 'dim') }}">{{ env.humidity_state|default('---') }}{% if env.humidity_threshold %} <span class="note">({{ env.humidity_threshold }}% limit)</span>{% endif %}</dd>
+        <dt>Wind</dt><dd class="st {{ 'ok' if env.wind_state=='SAFE' else ('warn' if env.wind_state=='WARNING' else 'bad' if env.wind_state=='CRITICAL' else 'dim') }}">{{ env.wind_state|default('---') }}{% if env.wind_threshold %} <span class="note">({{ env.wind_threshold }} km/h limit)</span>{% endif %}</dd>
+        <dt>Rain</dt><dd class="st {{ 'ok' if env.rain_state=='SAFE' else ('bad' if env.rain_state=='CRITICAL' else 'dim') }}">{{ env.rain_state|default('---') }}</dd>
+        <dt>Altitude</dt><dd class="st {{ 'ok' if env.altitude_state=='SAFE' else ('warn' if env.altitude_state=='WARNING' else 'bad' if env.altitude_state=='CRITICAL' else 'dim') }}">{{ env.altitude_state|default('---') }}{% if env.altitude_floor %} <span class="note">({{ env.altitude_floor }}&deg; floor)</span>{% endif %}</dd>
+        <dt>Safety Limit</dt><dd class="st {{ 'bad' if safety_limit_active else 'ok' }}">{{ 'ACTIVE' if safety_limit_active else 'Clear' }}</dd>
+        <dt>Cooldown</dt><dd class="st {{ 'warn' if cooldown_active else 'ok' }}">{{ 'ACTIVE' if cooldown_active else 'Clear' }}</dd>
+      </dl>
     </div></div>
   </div>
   <div class="col">
+    <div class="sec"><h3>Configured Thresholds <span class="tag">limits.json</span></h3><div class="sec-body">
+      <dl class="kv">
+        <dt>Max humidity</dt><dd>{{ env_thresholds.max_humidity_percent|default('---') }}%</dd>
+        <dt>Max wind</dt><dd>{{ env_thresholds.max_wind_speed_kmh|default('---') }} km/h</dd>
+        <dt>Close dome on rain</dt><dd>{{ 'Yes' if env_thresholds.close_dome_on_rain else 'No' }}</dd>
+        <dt>Min altitude</dt><dd>{{ alt_floor }}&deg;</dd>
+        <dt>Max altitude</dt><dd>{{ alt_max }}&deg;</dd>
+      </dl>
+      <div style="margin-top:6px">
+        <label class="f">Active safety interlocks</label>
+        <p class="note">Altitude safety: ACTIVE (STCS V1 AltitudeSafetyGuard)</p>
+        <p class="note">Humidity interlock: NOT ACTIVE (commented out in STCS V1)</p>
+        <p class="note">Wind interlock: NOT AVAILABLE (no hardware)</p>
+        <p class="note">Rain interlock: NOT AVAILABLE (no hardware)</p>
+      </div>
+      <p class="note mt">Thresholds from stcs_v1/config/limits.json. Safety enforcement in STCS V1.</p>
+    </div></div>
+    <div class="sec"><h3>Event Log <span class="tag">{{ audit|length }} events</span></h3><div class="sec-body scroll">
+      <table class="t"><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
+        {% for e in audit %}<tr><td>{{ e[3] }}</td><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td></tr>{% endfor %}
+      </table>
+      {% if not audit %}<p class="note mt">No records yet. Sign-ins, sign-outs and command requests are recorded here automatically.</p>{% endif %}
+    </div></div>
     <div class="sec"><h3>Configuration <span class="tag">safe settings</span></h3><div class="sec-body"><dl class="kv">
       <dt>Mode</dt><dd>{{ snap.mode }}</dd>
-      <dt>Telemetry</dt><dd>Alpaca 11111 · UDP 12344</dd>
+      <dt>Telemetry</dt><dd>Alpaca 11111 &middot; WS 11112</dd>
       <dt>Commands</dt><dd>{{ 'Armed' if commands_enabled=='YES' else 'Validation only' }}</dd>
-      <dt>Session</dt><dd>120 min · CSRF on</dd>
+      <dt>Session</dt><dd>120 min &middot; CSRF on</dd>
     </dl>
     <p class="note mt">Connection strings, passwords and secret keys are never displayed here.</p></div></div>
-    <div class="sec"><h3>Diagnostics</h3><div class="sec-body">
-      <dl class="kv"><dt>Mount link</dt><dd>{{ snap.alpaca.status|disp }}</dd>
-      <dt>Weather link</dt><dd>{{ snap.weather.status|disp }}</dd>
-      <dt>Archive DB</dt><dd>{{ "Ready" if db_ok else "Down" }}</dd></dl>
-      <p class="note mt">When a link reports a fault, check cabling, ports and the STCS desktop services before retrying from the web console.</p>
-    </div></div>
   </div>
 </div>
 {% endblock %}

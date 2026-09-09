@@ -15,9 +15,8 @@ DEFAULT_SESSION_SECRET = "stcs-session-secret-change-me-for-production"
 ADMIN_USERNAME_DEFAULT = "Admin"
 SCIENTIST_USERNAME_DEFAULT = "Scientist1"
 
-# Password hashing
-# Use SHA256 with a random 16-byte (32-char hex) salt
-# Format: salt:hash (both base62-encoded hex)
+# Password hashing: bcrypt (cost factor auto-tuned by bcrypt.gensalt())
+# Format: $2b$<cost>$<salt><hash>
 
 # Password validation minimum length
 MIN_PASSWORD_LENGTH = 6

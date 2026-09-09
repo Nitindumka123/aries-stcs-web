@@ -1,96 +1,78 @@
-# STCS V1 GUI
+# ARIES 104 cm Sampurnanand Telescope — Web Observatory Platform
 
-Desktop GUI for the ARIES STCS telescope control system.
+Modern web application for the 104 cm Sampurnanand Telescope (ARIES).
+Authenticated browser interface over the proven STCS V1 telescope-control core.
 
-## Purpose
+## PRIMARY APPLICATION: Web Observatory Platform
 
-This project launches a PyQt6 control dashboard for telescope, camera, GPS, weather, telemetry, and Alpaca services.
+The supported product is the **web application** in `stcs_web/`
+(FastAPI backend + authenticated workspaces + PostgreSQL).
 
-## Required Python
-
-- 64-bit Python 3.x
-- The repository does not pin an exact minor version
-
-## Required Packages
-
-Install from `stcs_v1/requirements.txt`:
-
-- PyQt6
-- pyserial
-- pywin32
-- numpy
-- astropy
-- opencv-python
-- pypylon
-- pytest
-- pythonnet
-- python-dotenv
-- requests
-- pynmea2
-- fastapi
-- websockets
-- uvicorn
-
-## Environment Setup
-
-1. Create a virtual environment.
-2. Activate it.
-3. Install the requirements.
-
-Example on Windows:
+### START (authoritative)
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
-pip install -r stcs_v1\requirements.txt
+pip install -r requirements.txt
+copy .env.example .env   # then fill in DB_PASSWORD, SESSION_SECRET
+python -m stcs_web
 ```
 
-## Run Command
+Equivalents: `python stcs_web/main.py`, or
+`uvicorn stcs_web.main:app --host 127.0.0.1 --port 8000`.
 
-```powershell
-python stcs_v1\src\main.py
+### OPEN
+
+- Login: http://127.0.0.1:8000/api/login
+- Control workspace: http://127.0.0.1:8000/app/control (after login)
+- API docs: http://127.0.0.1:8000/api/docs
+- Default dev users come from `ADMIN_USERNAME`/`SCIENTIST_USERNAME` in `.env`
+  (created in PostgreSQL on first start).
+
+### DO NOT START (legacy desktop GUI)
+
+`python stcs_v1/src/main.py` launches the historical PyQt6 desktop GUI.
+It is **preserved untouched** as the authoritative STCS V1 baseline for
+physical commissioning fallback — it is NOT the supported startup path.
+Running it by accident is a workflow error, not a product feature.
+See `docs/architecture/STCS_CORE_DEPENDENCY_AUDIT.md`.
+
+## How it fits together
+
+```
+Browser → FastAPI (auth → RBAC → routes/services) → STCS integration layer
+→ STCS V1 driver/config/workers → serial/Arduino/relay → telescope
 ```
 
-## Required Configuration
+- The browser NEVER touches serial ports, Arduino, relays, motors, or camera hardware.
+- Telescope commands are validated server-side and stay disabled unless
+  `STCS_COMMANDS_ENABLED=1` (default and required for all software work: `0`).
+- The web backend reads live telemetry from the STCS V1 Alpaca server (:11111)
+  and WebSocket telemetry server (:11112), plus `stcs_v1/config/*.json`.
+- Camera acquisition reuses `stcs_v1` `ScienceCameraDriver` via
+  `stcs_web/camera_adapter.py`, with graceful simulation fallback.
 
-- Optional `.env` file is loaded at startup.
-- `STCS_BUNDLE_ROOT` and `STCS_EXTERNAL_ROOT` are set by `src/main.py`.
-- Common runtime variables found in the code:
-  - `TELESCOPE_MODE`
-  - `LIGHTFIELD_ROOT`
-  - `ALPACA_HOST`
-  - `ALPACA_PORT`
-  - `TELEMETRY_WS_HOST`
-  - `TELEMETRY_WS_PORT`
-  - `INDI_HOST`
-  - `INDI_PORT`
-  - `DOME_MAX_SPEED_DPS`
-  - `DOME_RAMP_TIME_S`
-  - `DOME_COAST_DEG`
-  - `DOME_SYNC_TOLERANCE_DEG`
-  - `SLEW_SPEED_TRANSITION_DELAY_SEC`
+## Repository layout
 
-## External Hardware / Services
+- `stcs_web/` — authoritative web application (flat, proven layout; see `main.py`)
+- `stcs_v1/` — authoritative STCS V1 telescope-control baseline (**do not modify**)
+- `tests/` — auth, RBAC, session, camera, export, observation E2E checks
+- `scripts/` — local diagnostics (`check_db.py`, `verify_pg.py`)
+- `docs/` — architecture, security, operations, deployment, commissioning, QA
+- `requirements.txt` — web dependencies · `stcs_v1/requirements.txt` — legacy desktop
+- `.env.example` — config contract (placeholders only) · `.env` — local, never committed
 
-- PyQt6 GUI runtime
-- GPS serial receiver
-- Telescope/mount Arduino serial devices
-- Optional Princeton Instruments LightField camera stack
-- Optional local Alpaca and telemetry servers started by the app
-- Weather and mount hardware are expected for full operation
+## Safety
 
-## Known Limitations
+- `STCS_COMMANDS_ENABLED=0` always for software work. No physical telescope
+  operations are performed or tested from this repository state.
+- Physical hardware has NOT been tested. Commissioning steps live in
+  `docs/commissioning/` (to be executed on-site only).
 
-- The app did not start in this environment because `PyQt6` is not installed.
-- Camera support depends on LightField and `pythonnet`; without that hardware/software it falls back to mock mode.
-- The code uses serial auto-discovery, so real devices may be needed for full functionality.
+## Docs
 
-## Basic Folder Structure
-
-- `stcs_v1/src/main.py` starts the GUI.
-- `stcs_v1/src/ui/` contains the main window and widgets.
-- `stcs_v1/src/core/` contains telescope and safety logic.
-- `stcs_v1/src/workers/` contains background threads and servers.
-- `stcs_v1/src/drivers/` contains device drivers.
-- `stcs_v1/config/` contains runtime JSON settings.
-- `stcs_v1/tests/` contains diagnostics and checks.
+- `docs/operations/OPERATIONS.md` — run, configure, troubleshoot
+- `docs/deployment/DEPLOYMENT.md` — deployment notes
+- `docs/architecture/DEPENDENCY_MAP.md` — what imports what
+- `docs/architecture/WEB_TO_STCS_DEPENDENCY_MAP.md` — web→STCS contract
+- `docs/qa/` — QA campaign evidence (Prompts 1–4, P0=P1=P2=P3=0)

@@ -1,38 +1,309 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="console cols3">
+  <!-- Column 1: Camera status -->
   <div class="col">
-    <div class="sec"><h3>Camera status <span class="tag st bad">Disconnected</span></h3><div class="sec-body">
-      <dl class="kv"><dt>Driver</dt><dd class="st dim">Not available</dd>
-      <dt>Sensor</dt><dd>—</dd><dt>Link</dt><dd class="st dim">Disconnected</dd>
-      <dt>Acquisition</dt><dd class="st dim">Idle</dd>
-      <dt>Sensor temp</dt><dd>—</dd></dl>
-    </div></div>
-    <div class="sec"><h3>All-sky <span class="tag st dim">Offline</span></h3><div class="sec-body">
-      <label class="f">Image source</label><input value="http://192.168.1.100/image.jpg" disabled title="Configurable when the all-sky feed is online">
-      <p class="note mt">All-sky feed offline. Last update: never.</p>
-    </div></div>
-  </div>
-  <div class="col">
-    <div class="sec"><h3>Acquisition</h3><div class="sec-body">
-      <label class="f">Exposure (s)</label><input value="1.0" disabled title="Available when the camera is connected">
-      <div class="row"><div style="flex:1"><label class="f">Binning</label><select disabled><option>1×1</option><option>2×2</option><option>4×4</option></select></div>
-      <div style="flex:1"><label class="f">Frames</label><input value="1" disabled title="Available when the camera is connected"></div></div>
-      <label class="f">Shutter</label><select disabled><option>Normal</option><option>Always open</option><option>Always closed</option></select>
-      <div class="row mt"><button class="btn primary block" disabled>Acquire Frame</button></div>
-      <p class="note mt">Shutter, gain, readout speed, ROI and trigger settings activate with the camera link. Nothing is acquired automatically.</p>
-    </div></div>
-  </div>
-  <div class="col">
-    <div class="sec"><h3>Preview <span class="tag">no frame</span></h3><div class="sec-body">
-      <div style="background:var(--well);border:1px solid var(--line);border-radius:5px;min-height:220px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
-        <span style="font-size:26px;color:var(--faint)">◈</span>
-        <span class="note">No frame — the camera is disconnected.</span>
+    <div class="sec">
+      <h3>Camera <span class="tag st" id="cam-state-tag">{{ camera_status.state|default('NOT_AVAILABLE') }}</span></h3>
+      <div class="sec-body">
+        <dl class="kv">
+          <dt>Driver</dt><dd id="cam-driver">{{ 'Available' if camera_status.driver_available else 'Not available' }}</dd>
+          <dt>Mode</dt><dd id="cam-mode">{{ 'Simulation' if camera_status.mock_mode else 'Real' }}</dd>
+          <dt>Link</dt><dd id="cam-link" class="{{ 'st ok' if camera_status.connected else 'st dim' }}">{{ 'Connected' if camera_status.connected else 'Disconnected' }}</dd>
+          <dt>Sensor</dt><dd id="cam-temp">{{ camera_status.temperature|round(1) if camera_status.temperature else '---' }}&deg;C</dd>
+          <dt>State</dt><dd id="cam-acq-state">{{ 'Exposing' if camera_status.exposing else 'Idle' }}</dd>
+        </dl>
+        <div class="row mt">
+          {% if camera_status.connected %}
+          <button class="btn danger" id="btn-disconnect" onclick="cameraDisconnect()">Disconnect</button>
+          {% else %}
+          <button class="btn primary" id="btn-connect" onclick="cameraConnect()">Connect</button>
+          {% endif %}
+        </div>
       </div>
-    </div></div>
-    <div class="sec"><h3>Image history <span class="tag">0 frames</span></h3><div class="sec-body scroll">
-      <p class="note">Acquired frames will list here with metadata and download. Nothing recorded yet.</p>
-    </div></div>
+    </div>
+    <div class="sec">
+      <h3>Acquisition Lock</h3>
+      <div class="sec-body">
+        <dl class="kv">
+          <dt>Status</dt><dd id="cam-lock" class="{{ 'st warn' if camera_status.acquisition_lock.locked else '' }}">{{ 'Locked' if camera_status.acquisition_lock.locked else 'Free' }}</dd>
+          <dt>Owner</dt><dd id="cam-lock-owner">{{ camera_status.acquisition_lock.owner or '---' }}</dd>
+          <dt>Elapsed</dt><dd id="cam-lock-elapsed">{{ '%.0f'|format(camera_status.acquisition_lock.elapsed_s) if camera_status.acquisition_lock.elapsed_s else '---' }}s</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <!-- Column 2: Acquisition controls -->
+  <div class="col">
+    <div class="sec">
+      <h3>Acquisition</h3>
+      <div class="sec-body">
+        <label class="f">Target name</label>
+        <input type="text" id="acq-target" value="" placeholder="e.g. M42, NGC 7331">
+        <label class="f">Exposure (s)</label>
+        <input type="number" id="acq-exposure" value="1.0" min="0.001" max="3600" step="0.1">
+        <div class="row">
+          <div style="flex:1">
+            <label class="f">Binning</label>
+            <select id="acq-binning">
+              <option value="1,1">1x1</option>
+              <option value="2,2">2x2</option>
+              <option value="4,4">4x4</option>
+            </select>
+          </div>
+          <div style="flex:1">
+            <label class="f">Gain</label>
+            <select id="acq-gain">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+        <label class="f">Shutter</label>
+        <select id="acq-shutter">
+          <option value="normal">Normal</option>
+          <option value="alwaysopen">Always open</option>
+          <option value="alwaysclosed">Always closed</option>
+        </select>
+        <label class="f">ADC speed</label>
+        <select id="acq-adc">
+          <option value="2 MHz">2 MHz</option>
+          <option value="100 kHz">100 kHz</option>
+        </select>
+        <label class="f">Readout mode</label>
+        <select id="acq-readout">
+          <option value="full frame">Full Frame</option>
+          <option value="kinetics">Kinetics</option>
+        </select>
+        <label class="f">Notes</label>
+        <textarea id="acq-notes" rows="2" placeholder="Observation notes (optional)"></textarea>
+        <div class="row mt">
+          <button class="btn primary block" id="btn-acquire" onclick="startAcquisition()">Acquire Frame</button>
+        </div>
+        <div class="row mt" id="abort-row" style="display:none">
+          <button class="btn danger block" id="btn-abort" onclick="abortAcquisition()">Abort</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec" id="acq-result-sec" style="display:none">
+      <h3>Acquisition Result</h3>
+      <div class="sec-body">
+        <div id="acq-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Column 3: Preview + history -->
+  <div class="col">
+    <div class="sec">
+      <h3>Last Acquisition <span class="tag" id="preview-tag">no frame</span></h3>
+      <div class="sec-body">
+        <div id="preview-area" class="cam-preview">
+          <span class="cam-preview-icon">&#9670;</span>
+          <span class="note" id="preview-msg">No frame acquired yet.</span>
+        </div>
+        <div id="preview-meta" style="display:none" class="mt">
+          <dl class="kv">
+            <dt>File</dt><dd id="prev-filename">---</dd>
+            <dt>Size</dt><dd id="prev-size">---</dd>
+            <dt>SHA-256</dt><dd id="prev-checksum" class="mono" style="font-size:0.7em;word-break:break-all">---</dd>
+            <dt>Observation</dt><dd id="prev-obs">---</dd>
+            <dt>Duration</dt><dd id="prev-duration">---</dd>
+          </dl>
+          <div class="row mt">
+            <a class="btn" id="prev-download" href="#" download>Download .spe</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Recent Observations <span class="tag" id="obs-count">0</span></h3>
+      <div class="sec-body scroll" style="max-height:280px">
+        <div id="obs-list">
+          <p class="note">No observations recorded yet.</p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
+
+<script>
+var CAM = {
+  status: null,
+  pollTimer: null,
+  api: function(method, path, body) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(path, opts).then(function(r) {
+      if (r.status === 401) { window.location = '/api/login'; return null; }
+      return r.json();
+    });
+  },
+  updateStatusUI: function(s) {
+    if (!s) return;
+    this.status = s;
+    var tag = document.getElementById('cam-state-tag');
+    tag.textContent = s.state || 'UNKNOWN';
+    tag.className = 'tag st ' + stateClass(s.state);
+    document.getElementById('cam-driver').textContent = s.driver_available ? 'Available' : 'Not available';
+    document.getElementById('cam-mode').textContent = s.mock_mode ? 'Simulation' : 'Real';
+    var link = document.getElementById('cam-link');
+    link.textContent = s.connected ? 'Connected' : 'Disconnected';
+    link.className = s.connected ? 'st ok' : 'st dim';
+    document.getElementById('cam-temp').textContent = s.temperature != null ? s.temperature.toFixed(1) + '\u00b0C' : '---';
+    var acqState = document.getElementById('cam-acq-state');
+    acqState.textContent = s.exposing ? 'Exposing' : 'Idle';
+    acqState.className = s.exposing ? 'st warn' : '';
+    var lock = s.acquisition_lock || {};
+    var lockEl = document.getElementById('cam-lock');
+    lockEl.textContent = lock.locked ? 'Locked' : 'Free';
+    lockEl.className = lock.locked ? 'st warn' : '';
+    document.getElementById('cam-lock-owner').textContent = lock.owner || '---';
+    document.getElementById('cam-lock-elapsed').textContent = lock.elapsed_s != null ? Math.round(lock.elapsed_s) + 's' : '---';
+    var btnConn = document.getElementById('btn-connect');
+    var btnDisc = document.getElementById('btn-disconnect');
+    if (s.connected) {
+      if (btnConn) btnConn.style.display = 'none';
+      if (btnDisc) btnDisc.style.display = '';
+    } else {
+      if (btnConn) btnConn.style.display = '';
+      if (btnDisc) btnDisc.style.display = 'none';
+    }
+    document.getElementById('btn-acquire').disabled = !s.connected || s.exposing;
+    document.getElementById('btn-abort').disabled = !lock.locked;
+    document.getElementById('abort-row').style.display = lock.locked ? '' : 'none';
+  }
+};
+
+function stateClass(state) {
+  if (!state) return 'dim';
+  var s = state.toUpperCase();
+  if (s === 'CONNECTED' || s === 'READY' || s === 'COMPLETE') return 'ok';
+  if (s === 'EXPOSING' || s === 'READING' || s === 'CONFIGURING' || s === 'SAVING') return 'warn';
+  if (s === 'ERROR' || s === 'NOT_AVAILABLE') return 'bad';
+  return '';
+}
+
+async function cameraConnect() {
+  var btn = document.getElementById('btn-connect');
+  btn.disabled = true; btn.textContent = 'Connecting...';
+  var r = await CAM.api('POST', '/api/camera/connect');
+  btn.disabled = false; btn.textContent = 'Connect';
+  if (r && r.success) { toast('Camera connected' + (r.mock_mode ? ' (simulation)' : ''), 'ok'); pollStatus(); }
+  else toast('Connect failed: ' + (r ? r.error : 'unknown'), 'error');
+}
+
+async function cameraDisconnect() {
+  var r = await CAM.api('POST', '/api/camera/disconnect');
+  if (r && r.success) { toast('Camera disconnected', 'ok'); pollStatus(); }
+  else toast('Disconnect failed: ' + (r ? r.error : 'unknown'), 'error');
+}
+
+async function startAcquisition() {
+  var body = {
+    target: document.getElementById('acq-target').value || 'untitled',
+    exposure: parseFloat(document.getElementById('acq-exposure').value) || 1.0,
+    binning: document.getElementById('acq-binning').value.split(',').map(Number),
+    gain: document.getElementById('acq-gain').value,
+    shutter: document.getElementById('acq-shutter').value,
+    adc_speed: document.getElementById('acq-adc').value,
+    readout_mode: document.getElementById('acq-readout').value,
+    notes: document.getElementById('acq-notes').value,
+  };
+  var btn = document.getElementById('btn-acquire');
+  btn.disabled = true; btn.textContent = 'Acquiring...';
+  document.getElementById('abort-row').style.display = '';
+  document.getElementById('acq-result-sec').style.display = '';
+  document.getElementById('acq-result').innerHTML = '<span class="st warn">Exposure in progress...</span>';
+  try {
+    var r = await CAM.api('POST', '/api/camera/acquire', body);
+    if (r && r.success) {
+      document.getElementById('acq-result').innerHTML =
+        '<span class="st ok">COMPLETE</span> -- ' + r.filename +
+        '<br>Duration: ' + r.elapsed_s.toFixed(1) + 's' +
+        '<br>Size: ' + formatBytes(r.file_size) +
+        '<br>SHA-256: <code style="font-size:0.7em;word-break:break-all">' + r.checksum + '</code>' +
+        '<br><a href="/api/camera/file/' + r.file_id + '" class="btn mt" download>Download .spe</a>';
+      document.getElementById('preview-tag').textContent = r.filename;
+      document.getElementById('preview-meta').style.display = '';
+      document.getElementById('prev-filename').textContent = r.filename;
+      document.getElementById('prev-size').textContent = formatBytes(r.file_size);
+      document.getElementById('prev-checksum').textContent = r.checksum;
+      document.getElementById('prev-obs').textContent = '#' + r.obs_id;
+      document.getElementById('prev-duration').textContent = r.elapsed_s.toFixed(1) + 's';
+      document.getElementById('prev-download').href = '/api/camera/file/' + r.file_id;
+      toast('Acquisition complete: ' + r.filename, 'ok');
+      loadObservations();
+    } else {
+      document.getElementById('acq-result').innerHTML = '<span class="st bad">FAILED</span> -- ' + (r ? r.error : 'unknown');
+      toast('Acquisition failed', 'error');
+    }
+  } catch(e) {
+    document.getElementById('acq-result').innerHTML = '<span class="st bad">ERROR</span> -- ' + e.message;
+    toast('Acquisition error: ' + e.message, 'error');
+  }
+  btn.disabled = false; btn.textContent = 'Acquire Frame';
+  document.getElementById('abort-row').style.display = 'none';
+  pollStatus();
+}
+
+async function abortAcquisition() {
+  var r = await CAM.api('POST', '/api/camera/abort');
+  if (r && r.success) {
+    toast('Acquisition aborted', 'ok');
+    document.getElementById('acq-result').innerHTML = '<span class="st warn">ABORTED</span>';
+  } else toast('Abort failed: ' + (r ? r.error : 'unknown'), 'error');
+  pollStatus();
+}
+
+async function pollStatus() {
+  var s = await CAM.api('GET', '/api/camera/status');
+  if (s) CAM.updateStatusUI(s);
+}
+
+async function loadObservations() {
+  var r = await CAM.api('GET', '/api/camera/observations?limit=10');
+  if (!r || !r.items) return;
+  var el = document.getElementById('obs-list');
+  document.getElementById('obs-count').textContent = r.total || 0;
+  if (r.items.length === 0) { el.innerHTML = '<p class="note">No observations yet.</p>'; return; }
+  el.innerHTML = r.items.map(function(o) {
+    return '<div class="cam-obs-item">' +
+    '<a href="/app/observations?obs=' + o.id + '">' + esc(o.target || 'untitled') + '</a>' +
+    '<span class="st ' + stateClass(o.status) + '" style="margin-left:4px">' + o.status + '</span>' +
+    '<span class="note" style="margin-left:4px">' + (o.start ? new Date(o.start).toLocaleString() : '---') + '</span>' +
+    (o.duration_s != null ? '<span class="note" style="margin-left:4px">' + o.duration_s.toFixed(1) + 's</span>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function formatBytes(b) {
+  if (!b) return '---';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function toast(msg, type) {
+  var t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:16px;right:16px;padding:8px 14px;border-radius:3px;color:white;z-index:9999;font-size:11px;font-weight:600;background:' +
+    (type === 'error' ? '#b83a3a' : type === 'warn' ? '#c08820' : '#2a7aaa');
+  document.body.appendChild(t);
+  setTimeout(function() { t.remove(); }, 3000);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  pollStatus();
+  CAM.pollTimer = setInterval(pollStatus, 3000);
+  loadObservations();
+});
+</script>
 {% endblock %}

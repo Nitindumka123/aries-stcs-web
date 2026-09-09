@@ -1,106 +1,301 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="console cols3">
-  <!-- ===== COLUMN 1: position + tracking ===== -->
+  <!-- ===== COLUMN 1: Position + Tracking + Safety ===== -->
   <div class="col">
-    <div class="sec"><h3>Mount position <span class="tag"><span data-live="alpaca">{{ snap.alpaca.status|disp }}</span> · {{ alp_age }} ago</span></h3><div class="sec-body">
+    <div class="sec"><h3>Mount Position <span class="tag"><span data-live="telemetry">{{ snap.telemetry_status|disp }}</span> &middot; {{ telemetry_age }} &middot; {{ telemetry_source }}</span></h3><div class="sec-body">
       <div class="tstrip r2">
         <div class="tele hero"><div class="k">RIGHT ASCENSION</div><div class="v" data-live="ra">{{ ra_hms }}</div><div class="s">HH:MM:SS</div></div>
-        <div class="tele hero"><div class="k">DECLINATION</div><div class="v" data-live="dec">{{ dec_dms }}</div><div class="s">±DD°MM′SS″</div></div>
+        <div class="tele hero"><div class="k">DECLINATION</div><div class="v" data-live="dec">{{ dec_dms }}</div><div class="s">&plusmn;DD&deg;MM&prime;SS&Prime;</div></div>
       </div>
       <div class="tstrip r3 mt">
-        <div class="tele"><div class="k">HOUR ANGLE</div><div class="v" style="font-size:15px" data-live="hra">{{ hra_hms }}</div></div>
-        <div class="tele"><div class="k">AZIMUTH</div><div class="v" style="font-size:15px" data-live="az">{{ az }}</div></div>
-        <div class="tele"><div class="k">ALTITUDE</div><div class="v" style="font-size:15px" data-live="alt">{{ alt }}</div></div>
-        <div class="tele"><div class="k">LST · {{ snap.lst_source }}</div><div class="v" style="font-size:15px" data-live="lst">{{ lst_hms }}</div></div>
-        <div class="tele"><div class="k">JULIAN DATE</div><div class="v" style="font-size:13px">{{ jd }}</div></div>
-        <div class="tele"><div class="k">MOUNT STATE</div><div class="v st {{ 'warn' if motion_state!='IDLE' else 'ok' }}" style="font-size:15px" data-live="motion">{{ motion_state }}</div></div>
+        <div class="tele"><div class="k">HOUR ANGLE</div><div class="v" data-live="hra">{{ hra_hms }}</div></div>
+        <div class="tele"><div class="k">AZIMUTH</div><div class="v" data-live="az">{{ az }}</div></div>
+        <div class="tele"><div class="k">ALTITUDE</div><div class="v" data-live="alt">{{ alt }}</div></div>
+      </div>
+      <div class="tstrip r3 mt">
+        <div class="tele"><div class="k">LST &middot; {{ lst_source }}</div><div class="v" data-live="lst">{{ lst_hms }}</div></div>
+        <div class="tele"><div class="k">JULIAN DATE</div><div class="v" style="font-size:12px">{{ jd }}</div></div>
+        <div class="tele"><div class="k">MOUNT STATE</div><div class="v st {{ 'warn' if motion_state!='IDLE' else 'ok' }}" data-live="motion">{{ motion_state }}</div></div>
       </div>
     </div></div>
     <div class="sec"><h3>Tracking <span class="tag st {{ 'ok' if tracking=='ON' else 'dim' }}" data-live="tracking">{{ 'TRACKING' if tracking=='ON' else 'NOT TRACKING' }}</span></h3><div class="sec-body">
       <div class="row">
-        <form method="post" action="/api/command/validate" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="tracking_on"><button class="btn primary" type="submit">Track ON</button></form>
-        <form method="post" action="/api/command/validate" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="tracking_off"><button class="btn" type="submit">Track OFF</button></form>
-        <span class="note">Sidereal drive: {{ sidereal }} · rate 0.004178074 °/s</span>
+        <form method="post" action="/api/command/tracking" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="on"><button class="btn primary sm" type="submit">Track ON</button></form>
+        <form method="post" action="/api/command/tracking" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="off"><button class="btn sm" type="submit">Track OFF</button></form>
+        <span class="note">Sidereal: {{ sidereal }}</span>
       </div>
+    </div></div>
+    <div class="sec"><h3>Safety <span class="tag st {{ 'ok' if snap.safety.overall=='SAFE' else ('warn' if snap.safety.overall=='WARNING' else 'bad' if snap.safety.overall=='CRITICAL' else 'dim') }}">{{ snap.safety.overall }}</span></h3><div class="sec-body">
+      <dl class="kv">
+        <dt>Humidity</dt><dd class="st {{ 'ok' if env.humidity_state=='SAFE' else ('warn' if env.humidity_state=='WARNING' else 'bad' if env.humidity_state=='CRITICAL' else 'dim') }}" data-live="hum-state">{{ env.humidity_state|default('---') }}{% if env.humidity_threshold %} <span class="note">({{ env.humidity_threshold }}%)</span>{% endif %}</dd>
+        <dt>Wind</dt><dd class="st {{ 'ok' if env.wind_state=='SAFE' else ('warn' if env.wind_state=='WARNING' else 'bad' if env.wind_state=='CRITICAL' else 'dim') }}" data-live="wind-state">{{ env.wind_state|default('---') }}</dd>
+        <dt>Rain</dt><dd class="st {{ 'ok' if env.rain_state=='SAFE' else ('bad' if env.rain_state=='CRITICAL' else 'dim') }}" data-live="rain-state">{{ env.rain_state|default('---') }}</dd>
+        <dt>Altitude</dt><dd class="st {{ 'ok' if env.altitude_state=='SAFE' else ('warn' if env.altitude_state=='WARNING' else 'bad' if env.altitude_state=='CRITICAL' else 'dim') }}" data-live="alt-state">{{ env.altitude_state|default('---') }}</dd>
+        <dt>Safety Limit</dt><dd class="st {{ 'bad' if safety_limit_active else 'ok' }}">{{ 'ACTIVE' if safety_limit_active else 'Clear' }}{% if safety_limit_message %} <span class="note">{{ safety_limit_message }}</span>{% endif %}</dd>
+        <dt>Cooldown</dt><dd class="st {{ 'warn' if cooldown_active else 'ok' }}">{{ 'ACTIVE' if cooldown_active else 'Clear' }}</dd>
+      </dl>
+      <div class="row mt">
+        <form method="post" action="/api/command/lock/acquire" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn sm block" type="submit" title="Single-operator control ownership">Take Lock</button></form>
+        <form method="post" action="/api/command/lock/release" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn sm" type="submit">Release</button></form>
+      </div>
+      <div class="row mt">
+        <div style="flex:1"><label class="f">Commands</label><span id="commands-enabled" class="tag {{ 'ok' if commands_enabled=='YES' else 'dim' }}">{{ 'ENABLED' if commands_enabled=='YES' else 'DISABLED' }}</span></div>
+        <div style="flex:1"><label class="f">STCS</label><span id="stcs-connected" class="st {{ 'ok' if snap.ws.status=='LIVE' else 'bad' }}">{{ 'CONNECTED' if snap.ws.status=='LIVE' else 'DISCONNECTED' }}</span></div>
+      </div>
+      <p class="note mt">Lock: <span id="lock-owner">{{ snap.control_lock.owner or 'Free' }}</span></p>
     </div></div>
   </div>
-  <!-- ===== COLUMN 2: motion + target ===== -->
+
+  <!-- ===== COLUMN 2: Manual Motion + Target ===== -->
   <div class="col">
-    <div class="sec"><h3>Manual motion <span class="tag">{{ motion_state }}</span></h3><div class="sec-body">
+    <div class="sec"><h3>Manual Motion <span class="tag">{{ motion_state }}</span></h3><div class="sec-body">
       <div class="dpad" role="group" aria-label="Telescope direction pad">
-        <span></span><button disabled title="Move north (DEC+)">▲<br><span style="font-size:9px">N</span></button><span></span>
-        <button disabled title="Move west">◀<br><span style="font-size:9px">W</span></button><div class="mid">HOLD<br>TO<br>MOVE</div><button disabled title="Move east">▶<br><span style="font-size:9px">E</span></button>
-        <span></span><button disabled title="Move south (DEC−)">▼<br><span style="font-size:9px">S</span></button><span></span>
+        <span></span>
+        <button class="hold-btn" data-axis="DEC" data-direction="NORTH" title="Move north (DEC+)">&#9650;<br><span style="font-size:8px">N</span></button>
+        <span></span>
+        <button class="hold-btn" data-axis="RA" data-direction="WEST" title="Move west (RA+)">&#9664;<br><span style="font-size:8px">W</span></button>
+        <div class="mid">HOLD<br>TO<br>MOVE</div>
+        <button class="hold-btn" data-axis="RA" data-direction="EAST" title="Move east (RA-)">&#9654;<br><span style="font-size:8px">E</span></button>
+        <span></span>
+        <button class="hold-btn" data-axis="DEC" data-direction="SOUTH" title="Move south (DEC-)">&#9660;<br><span style="font-size:8px">S</span></button>
+        <span></span>
       </div>
-      <label class="f">RA speed</label>
-      <div class="seg" role="group" aria-label="RA speed">{% for s in ["COARSE","FINE 1","FINE 2"] %}<button disabled title="RA {{ s }}">{{ s }}</button>{% endfor %}</div>
-      <label class="f">DEC speed</label>
-      <div class="seg" role="group" aria-label="DEC speed">{% for s in ["COARSE","FINE 1","FINE 2"] %}<button disabled title="DEC {{ s }}">{{ s }}</button>{% endfor %}</div>
+      <label class="f">RA Speed</label>
+      <div class="seg" role="group" aria-label="RA speed" id="ra-speed-group">
+        {% for s in ["COARSE","FINE_1","FINE_2"] %}<button class="speed-btn" data-axis="RA" data-speed="{{ s }}" title="RA {{ s }}">{{ s }}</button>{% endfor %}</div>
+      <label class="f">DEC Speed</label>
+      <div class="seg" role="group" aria-label="DEC speed" id="dec-speed-group">
+        {% for s in ["COARSE","FINE_1","FINE_2"] %}<button class="speed-btn" data-axis="DEC" data-speed="{{ s }}" title="DEC {{ s }}">{{ s }}</button>{% endfor %}</div>
+      <div class="row mt">
+        <form method="post" action="/api/command/stop" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn danger block" type="submit">EMERGENCY STOP</button></form>
+      </div>
     </div></div>
-    <div class="sec"><h3>Target</h3><div class="sec-body">
-      <form method="post" action="/api/command/validate" onsubmit="return confirm('Slew to this target?');">
+    <div class="sec"><h3>Go-To Target</h3><div class="sec-body">
+      <form method="post" action="/api/command/slew" onsubmit="return confirm('Slew to this target?');">
         <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="command" value="slewtocoordinatesasync">
-        <div class="row"><div style="flex:1"><label class="f">Target RA °</label><input name="ra_deg" placeholder="189.20"></div>
-        <div style="flex:1"><label class="f">Target DEC °</label><input name="dec_deg" placeholder="27.30"></div></div>
+        <div class="row"><div style="flex:1"><label class="f">Target RA (deg)</label><input name="ra_deg" placeholder="189.20"></div>
+        <div style="flex:1"><label class="f">Target DEC (deg)</label><input name="dec_deg" placeholder="27.30"></div></div>
         <div class="row mt">
           <button class="btn primary" style="flex:1.4" type="submit">Go To Target</button>
         </div>
       </form>
-      <form method="post" action="/api/command/validate" class="mt" onsubmit="return confirm('Park the telescope?');">
+      <form method="post" action="/api/command/park" class="mt" onsubmit="return confirm('Park the telescope?');">
         <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="command" value="park">
         <button class="btn block" type="submit">Park Telescope</button>
       </form>
+      <div id="command-feedback" class="cmd-feedback mt" style="display:none;"></div>
       {% if cmd_result %}<p class="note mt">{{ cmd_result }}</p>{% endif %}
     </div></div>
+    <div class="sec"><h3>Environment <span class="tag {{ 'ok' if env.weather_status=='LIVE' else ('warn' if env.weather_status=='STALE' else 'dim') }}" data-live="wx-status">{{ env.weather_status|default('UNKNOWN') }}</span></h3><div class="sec-body">
+      <div class="tstrip r3">
+        <div class="tele"><div class="k">TEMP</div><div class="v" data-live="temp" style="font-size:14px">{{ env.temperature|default('---') }}{% if env.temperature is not none %}&deg;C{% endif %}</div></div>
+        <div class="tele"><div class="k">HUMIDITY</div><div class="v" data-live="hum" style="font-size:14px">{{ env.humidity|default('---') }}{% if env.humidity is not none %}%{% endif %}</div></div>
+        <div class="tele"><div class="k">DEW POINT</div><div class="v" data-live="dew" style="font-size:14px">{{ env.dew_point|default('---') }}{% if env.dew_point is not none %}&deg;C{% endif %}</div></div>
+      </div>
+      <dl class="kv mt">
+        <dt>Source</dt><dd class="note">{{ env.weather_source|default('---') }}</dd>
+        <dt>Updated</dt><dd data-live="wx-age">{{ env.weather_age_fmt|default('---') }} ago</dd>
+        <dt>Site</dt><dd>{{ site_lat }}, {{ site_lon }}</dd>
+      </dl>
+    </div></div>
   </div>
-  <!-- ===== COLUMN 3: dome + observatory state + calibration ===== -->
+
+  <!-- ===== COLUMN 3: Dome + Calibration ===== -->
   <div class="col">
     <div class="sec"><h3>Dome <span class="tag">{{ dome_state }}</span></h3><div class="sec-body">
       <div class="tstrip r2">
         <div class="tele"><div class="k">DOME AZIMUTH</div><div class="v">{{ dome_az }}</div><div class="s">degrees</div></div>
-        <div class="tele"><div class="k">SYNC</div><div class="v" style="font-size:14px">{{ dome_sync }}</div></div>
+        <div class="tele"><div class="k">SYNC</div><div class="v" style="font-size:13px">{{ dome_sync }}</div></div>
       </div>
       <div class="row mt">
-        {% for c,label in [("dome_cw","↻ CW"),("dome_off","■ Stop"),("dome_ccw","↺ CCW")] %}
-        <form method="post" action="/api/command/validate" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="{{ c }}"><button class="btn sm block" type="submit">{{ label }}</button></form>
-        {% endfor %}
+        <form method="post" action="/api/command/dome" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="CW"><button class="btn sm block" type="submit">&#8635; CW</button></form>
+        <form method="post" action="/api/command/dome" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="OFF"><button class="btn sm block" type="submit">&#9632; Stop</button></form>
+        <form method="post" action="/api/command/dome" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="CCW"><button class="btn sm block" type="submit">&#8634; CCW</button></form>
       </div>
       <div class="row mt">
-        <form method="post" action="/api/command/validate" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="synccalibration"><button class="btn sm block" type="submit">Sync</button></form>
-        <button class="btn sm" style="flex:1" disabled title="Automatic dome tracking follows once enabled">Auto Track Sync</button>
+        <form method="post" action="/api/command/calibration" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="sync"><button class="btn sm block" type="submit">Sync</button></form>
+        <button class="btn sm" style="flex:1" disabled title="Automatic dome tracking follows once enabled">Auto Track</button>
       </div>
     </div></div>
-    <div class="sec"><h3>Observatory <span class="tag">{{ snap.weather.status|disp }}{% if wx_age != '—' %} · {{ wx_age }} ago{% endif %}</span></h3><div class="sec-body">
-      <dl class="kv">
-        <dt>Temperature</dt><dd data-live="temp">{{ w_temp }}{% if w_temp != '—' %} °C{% endif %}</dd>
-        <dt>Humidity</dt><dd data-live="hum">{{ w_hum }}{% if w_hum != '—' %} %{% endif %}</dd>
-        <dt>Dew point</dt><dd>{{ w_dew }}{% if w_dew != '—' %} °C{% endif %}</dd>
-        <dt>GPS</dt><dd class="st dim">Not available</dd>
-        <dt>Site</dt><dd>{{ site_lat }}, {{ site_lon }}</dd>
-        <dt>Safety</dt><dd class="st {{ 'ok' if snap.safety.overall=='SAFE' else 'warn' }}" data-live="safety">{{ snap.safety.overall }}</dd>
-      </dl>
-      <div class="row mt">
-        <form method="post" action="/api/command/lock" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn sm block" type="submit" title="Single-operator control ownership, expires after 5 minutes idle">Take Lock</button></form>
-        <form method="post" action="/api/command/unlock" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn sm" type="submit">Release</button></form>
-      </div>
-      <p class="note mt">Lock holder: {{ snap.control_lock.owner or 'none — lock is free' }}</p>
-    </div></div>
-    <details class="cal"><summary>CALIBRATION · HOME / OFFSETS</summary><div class="cbody">
+    <details class="cal"><summary>CALIBRATION &middot; HOME / OFFSETS</summary><div class="cbody">
       <table class="t"><tr><th>Parameter</th><th>Value</th></tr>
       <tr><td>DEC home</td><td>{{ dec_home }}</td></tr>
       <tr><td>RA offset</td><td>{{ ra_off }}</td></tr>
       <tr><td>DEC offset</td><td>{{ dec_off }}</td></tr>
       <tr><td>Dome offset</td><td>{{ dome_off }}</td></tr></table>
-      <form method="post" action="/api/command/validate" class="mt"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="synccalibration">
+      <form method="post" action="/api/command/calibration" class="mt"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="sync">
       <label class="f">RA (HMS) / Set RA</label><input name="ra_hms" placeholder="12:42:31.42">
       <label class="f">DEC (DMS) / Set DEC</label><input name="dec_dms" placeholder="+27:18:42.6">
       <label class="f">Dome AZ / Set Dome</label><input name="dome_az" placeholder="0.0">
       <div class="row mt"><button class="btn sm" type="submit">Apply Calibration</button></div></form>
-      <form method="post" action="/api/command/validate" class="mt" onsubmit="return confirm('Clear all offsets?');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="command" value="clear_offsets"><button class="btn sm danger" type="submit">Clear Offsets</button></form>
+      <form method="post" action="/api/command/calibration" class="mt" onsubmit="return confirm('Clear all offsets?');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="clear_offsets"><button class="btn sm danger" type="submit">Clear Offsets</button></form>
     </div></details>
+    <div class="sec"><h3>Telemetry Details</h3><div class="sec-body">
+      <dl class="kv">
+        <dt>RA Speed</dt><dd>{{ ra_speed or '---' }}</dd>
+        <dt>RA Dir</dt><dd>{{ ra_direction or '---' }}</dd>
+        <dt>DEC Speed</dt><dd>{{ dec_speed or '---' }}</dd>
+        <dt>DEC Dir</dt><dd>{{ dec_direction or '---' }}</dd>
+        <dt>At Park</dt><dd>{{ 'Yes' if atpark else ('No' if atpark is not none else '---') }}</dd>
+        <dt>At Home</dt><dd>{{ 'Yes' if athome else ('No' if athome is not none else '---') }}</dd>
+      </dl>
+    </div></div>
   </div>
 </div>
+
+<script>
+(function() {
+    var holdButtons = document.querySelectorAll('.hold-btn');
+    var activeButton = null;
+
+    function sendManualCommand(axis, direction, speed, isStart) {
+        fetch('/api/command/manual', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+                '_stcs_csrf_token': '{{ csrf_token }}',
+                'axis': axis,
+                'direction': isStart ? direction : 'NONE',
+                'speed': speed
+            })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.status !== 'ACCEPTED' && data.status !== 'EXECUTED') {
+                console.warn('Command rejected:', data.message);
+                showToast(data.message, 'error');
+            }
+        }).catch(function(e) { console.error('Command failed:', e); });
+    }
+
+    function getSelectedSpeed(axis) {
+        var group = document.getElementById(axis.toLowerCase() + '-speed-group');
+        if (!group) return 'COARSE';
+        var btn = group.querySelector('.speed-btn.active');
+        return btn ? btn.dataset.speed : 'COARSE';
+    }
+
+    holdButtons.forEach(function(btn) {
+        btn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            var axis = btn.dataset.axis;
+            var direction = btn.dataset.direction;
+            var speed = getSelectedSpeed(axis);
+            activeButton = {axis: axis, direction: direction, speed: speed};
+            sendManualCommand(axis, direction, speed, true);
+            btn.classList.add('active-hold');
+        });
+        btn.addEventListener('mouseup', function() {
+            if (activeButton) {
+                sendManualCommand(activeButton.axis, activeButton.direction, activeButton.speed, false);
+                activeButton = null;
+                btn.classList.remove('active-hold');
+            }
+        });
+        btn.addEventListener('mouseleave', function() {
+            if (activeButton && activeButton.direction === btn.dataset.direction) {
+                sendManualCommand(activeButton.axis, activeButton.direction, activeButton.speed, false);
+                activeButton = null;
+                btn.classList.remove('active-hold');
+            }
+        });
+        btn.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            var axis = btn.dataset.axis;
+            var direction = btn.dataset.direction;
+            var speed = getSelectedSpeed(axis);
+            activeButton = {axis: axis, direction: direction, speed: speed};
+            sendManualCommand(axis, direction, speed, true);
+            btn.classList.add('active-hold');
+        }, {passive: false});
+        btn.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            if (activeButton && activeButton.direction === btn.dataset.direction) {
+                sendManualCommand(activeButton.axis, activeButton.direction, activeButton.speed, false);
+                activeButton = null;
+                btn.classList.remove('active-hold');
+            }
+        });
+    });
+
+    document.querySelectorAll('.speed-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var group = btn.closest('.seg');
+            group.querySelectorAll('.speed-btn').forEach(function(b) { b.classList.remove('active', 'on'); });
+            btn.classList.add('active', 'on');
+        });
+    });
+
+    document.querySelectorAll('.seg').forEach(function(group) {
+        var first = group.querySelector('.speed-btn');
+        if (first) first.classList.add('active');
+    });
+
+    function showToast(message, type) {
+        var toast = document.createElement('div');
+        toast.textContent = message;
+        toast.style.cssText = 'position:fixed;bottom:16px;right:16px;padding:8px 14px;border-radius:3px;color:white;z-index:9999;font-size:11px;font-weight:600;background:' +
+            (type === 'error' ? '#b83a3a' : type === 'warn' ? '#c08820' : '#2a7aaa');
+        document.body.appendChild(toast);
+        setTimeout(function() { toast.remove(); }, 3000);
+    }
+
+    function showCommandFeedback(command, status, message) {
+        var container = document.getElementById('command-feedback');
+        if (!container) return;
+        var statusLabels = {
+            'ACCEPTED': 'ACCEPTED', 'EXECUTED': 'EXECUTED',
+            'REJECTED': 'REJECTED', 'BLOCKED': 'BLOCKED',
+            'BUSY': 'BUSY', 'UNSAFE': 'UNSAFE',
+            'DISCONNECTED': 'DISCONNECTED', 'STALE': 'STALE',
+            'TIMEOUT': 'TIMEOUT', 'ERROR': 'ERROR',
+            'COMMANDS_DISABLED': 'DISABLED', 'UNAUTHORIZED': 'UNAUTHORIZED',
+            'INVALID': 'INVALID',
+        };
+        var ts = new Date().toLocaleTimeString();
+        container.innerHTML = '<div class="cmd-result status-' + status.toLowerCase() + '">' +
+            '<span class="cmd-status">' + (statusLabels[status] || status) + '</span>' +
+            '<span class="cmd-command">' + command + '</span>' +
+            '<span class="cmd-message">' + message + '</span>' +
+            '<span class="cmd-time">' + ts + '</span></div>';
+        container.style.display = 'block';
+        if (['ACCEPTED', 'EXECUTED'].indexOf(status) !== -1) {
+            setTimeout(function() { if (container.innerHTML) container.style.display = 'none'; }, 10000);
+        }
+    }
+
+    async function pollCommandStatus() {
+        try {
+            var r = await fetch('/api/command/status', {credentials: 'same-origin'});
+            if (r.ok) {
+                var d = await r.json();
+                var el = document.getElementById('commands-enabled');
+                if (el && d.commands_enabled !== undefined) {
+                    el.textContent = d.commands_enabled ? 'ENABLED' : 'DISABLED';
+                    el.className = 'tag ' + (d.commands_enabled ? 'ok' : 'dim');
+                }
+                var stcs = document.getElementById('stcs-connected');
+                if (stcs && d.stcs_connected !== undefined) {
+                    stcs.textContent = d.stcs_connected ? 'CONNECTED' : 'DISCONNECTED';
+                    stcs.className = 'st ' + (d.stcs_connected ? 'ok' : 'bad');
+                }
+                var lock = document.getElementById('lock-owner');
+                if (lock && d.control_lock) {
+                    lock.textContent = d.control_lock.owner ? d.control_lock.owner : 'Free';
+                }
+            }
+        } catch (e) {}
+    }
+
+    var urlParams = new URLSearchParams(window.location.search);
+    var cmdResult = urlParams.get('cmd');
+    if (cmdResult) {
+        showCommandFeedback('form', 'EXECUTED', decodeURIComponent(cmdResult));
+        urlParams.delete('cmd');
+        window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    setInterval(pollCommandStatus, 5000);
+    pollCommandStatus();
+})();
+</script>
 {% endblock %}

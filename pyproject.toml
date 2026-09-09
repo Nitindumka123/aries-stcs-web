@@ -1,0 +1,8 @@
+[project]
+name = "aries-stcs-web"
+version = "1.0.0"
+description = "ARIES 104 cm Sampurnanand Telescope Web Observatory Platform"
+requires-python = ">=3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

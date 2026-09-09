@@ -8,21 +8,25 @@ WHY this module exists:
 
     1. ASCOM Alpaca HTTP server (default 127.0.0.1:11111) — read-only GETs
        for RA/DEC/LST/Alt/Az/tracking/slewing/park/home + site lat/lon/elev.
-    2. STCS JSON config (stcs_v1/config/limits.json, settings.json,
+    2. STCS WebSocket Telemetry Server (default 127.0.0.1:11112) — read-only
+       WebSocket client receiving 10Hz telemetry broadcasts with motion state,
+       dome state, tracking, safety limits, and weather.
+    3. STCS JSON config (stcs_v1/config/limits.json, settings.json,
        state.json) — authoritative safety limits, site, offsets.
-    3. Weather UDP broadcasts (default port 12344, "temp,humidity,dew_point"
-       CSV datagrams) — listened to passively, never polled.
 
 WHAT it never does:
   - Never sends Alpaca PUTs, WebSocket commands, serial bytes, or relay
     payloads. All *command* paths live behind the validated command gate
     in routes.py, which is disabled by default (STCS_COMMANDS_ENABLED=0).
+  - Never binds to UDP port 12344 (weather) to avoid conflict with
+    stcs_v1 WeatherWorker which owns that port.
 
 Failure semantics: every source returns (value, status, updated_at).
-Statuses: LIVE / STALE / NOT_CONNECTED / NOT_AVAILABLE / UNKNOWN.
+Statuses: LIVE / STALE / DISCONNECTED / NOT_AVAILABLE / UNKNOWN.
 The UI must render these states, never fabricate values.
 """
 
+import asyncio
 import json
 import os
 import socket
@@ -30,6 +34,10 @@ import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
+from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlparse
+
+import websockets
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STCS_CONFIG_DIR = os.environ.get(
@@ -39,15 +47,14 @@ STCS_CONFIG_DIR = os.environ.get(
 ALPACA_HOST = os.environ.get("ALPACA_HOST", "127.0.0.1")
 ALPACA_PORT = int(os.environ.get("ALPACA_PORT", "11111"))
 ALPACA_TIMEOUT_S = float(os.environ.get("ALPACA_TIMEOUT_S", "0.5"))
-# WHY a short TTL cache: the snapshot polls ~14 Alpaca properties
-# sequentially; without caching, every page load + API poll would pay up to
-# 14 × timeout when Alpaca is down. The UI polls at ~1Hz, so a 2s cache
-# keeps displayed staleness honest (updated_at is exposed) while bounding
-# worst-case page latency.
 ALPACA_CACHE_TTL_S = float(os.environ.get("ALPACA_CACHE_TTL_S", "2.0"))
-_alpaca_cache = {"at": 0.0, "data": None}
-_alpaca_lock = threading.Lock()
-WEATHER_PORT = int(os.environ.get("WEATHER_PORT", "12344"))
+
+TELEMETRY_WS_HOST = os.environ.get("TELEMETRY_WS_HOST", "127.0.0.1")
+TELEMETRY_WS_PORT = int(os.environ.get("TELEMETRY_WS_PORT", "11112"))
+TELEMETRY_WS_URL = f"ws://{TELEMETRY_WS_HOST}:{TELEMETRY_WS_PORT}/ws/telemetry"
+WS_RECONNECT_DELAY_S = float(os.environ.get("WS_RECONNECT_DELAY_S", "3.0"))
+WS_CONNECT_TIMEOUT_S = float(os.environ.get("WS_CONNECT_TIMEOUT_S", "5.0"))
+
 STALE_AFTER_S = float(os.environ.get("TELEMETRY_STALE_AFTER_S", "5.0"))
 
 _ALPACA_PROPS = [
@@ -68,71 +75,38 @@ _ALPACA_PROPS = [
     "targetdeclination",
 ]
 
-# ── Weather UDP listener (passive cache) ────────────────────────────────
-_weather_cache = {"payload": None, "updated_at": 0.0, "status": "NOT_CONNECTED"}
-_weather_lock = threading.Lock()
-_weather_thread = None
+# ── Alpaca HTTP cache ──────────────────────────────────────────────────────
+_alpaca_cache: Dict[str, Any] = {"at": 0.0, "data": None}
+_alpaca_lock = threading.Lock()
+
+# ── WebSocket telemetry cache ──────────────────────────────────────────────
+_ws_cache: Dict[str, Any] = {
+    "payload": None,
+    "updated_at": 0.0,
+    "status": "NOT_CONNECTED",
+    "last_error": None,
+}
+_ws_lock = threading.Lock()
+_ws_thread: Optional[threading.Thread] = None
+_ws_stop_event: Optional[threading.Event] = None
+_ws_loop: Optional[asyncio.AbstractEventLoop] = None
+
+# ── Config cache ───────────────────────────────────────────────────────────
+_config_cache: Dict[str, Any] = {"at": 0.0, "data": None, "status": "UNKNOWN"}
+_config_lock = threading.Lock()
+_CONFIG_CACHE_TTL_S = 30.0
 
 
-def _weather_loop(port: int):
-    """Listen passively for 'temp,humidity,dew_point' CSV datagrams."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("0.0.0.0", port))
-        sock.settimeout(1.0)
-    except OSError:
-        with _weather_lock:
-            _weather_cache["status"] = "NOT_AVAILABLE"
-        return
-    with _weather_lock:
-        _weather_cache["status"] = "LISTENING"
-    while True:
-        try:
-            data, _ = sock.recvfrom(1024)
-            text = data.decode("utf-8", errors="ignore").strip()
-            parts = [p.strip() for p in text.split(",")]
-            if len(parts) >= 2:
-                payload = {
-                    "temp_c": _safe_float(parts[0]),
-                    "humidity_pct": _safe_float(parts[1]),
-                    "dew_point_c": _safe_float(parts[2]) if len(parts) > 2 else None,
-                    "raw": text,
-                }
-                with _weather_lock:
-                    _weather_cache.update(
-                        {"payload": payload, "updated_at": time.time(),
-                         "status": "LIVE"}
-                    )
-        except socket.timeout:
-            continue
-        except Exception:
-            time.sleep(0.5)
-
-
-def ensure_weather_listener():
-    """Start the passive UDP listener once (idempotent)."""
-    global _weather_thread
-    if _weather_thread is None or not _weather_thread.is_alive():
-        _weather_thread = threading.Thread(
-            target=_weather_loop, args=(WEATHER_PORT,), daemon=True
-        )
-        _weather_thread.start()
-
-
-def _safe_float(value):
+def _safe_float(value: Any) -> Optional[float]:
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
 
 
-def _alpaca_get(prop_name: str):
+def _alpaca_get(prop_name: str) -> tuple[Optional[Any], bool]:
     """Single read-only Alpaca GET. Returns (value, ok)."""
-    url = (
-        f"http://{ALPACA_HOST}:{ALPACA_PORT}"
-        f"/api/v1/telescope/0/{prop_name}"
-    )
+    url = f"http://{ALPACA_HOST}:{ALPACA_PORT}/api/v1/telescope/0/{prop_name}"
     try:
         with urllib.request.urlopen(url, timeout=ALPACA_TIMEOUT_S) as resp:
             body = json.loads(resp.read().decode("utf-8"))
@@ -143,13 +117,8 @@ def _alpaca_get(prop_name: str):
         return None, False
 
 
-def _alpaca_reachable():
-    """Fail-fast TCP probe so a down Alpaca server costs ~ms, not 14 timeouts.
-
-    WHY: each property GET has its own timeout; when nothing listens on the
-    Alpaca port the kernel refuses instantly, but a hanging host would stall
-    every page render. One short probe decides before the full poll.
-    """
+def _alpaca_reachable() -> bool:
+    """Fail-fast TCP probe so a down Alpaca server costs ~ms, not 14 timeouts."""
     try:
         sock = socket.create_connection((ALPACA_HOST, ALPACA_PORT), timeout=0.3)
         sock.close()
@@ -158,25 +127,35 @@ def _alpaca_reachable():
         return False
 
 
-def read_alpaca_snapshot():
+def read_alpaca_snapshot() -> Dict[str, Any]:
     """Poll all read-only Alpaca properties. Never sends PUTs."""
     with _alpaca_lock:
-        if (_alpaca_cache["data"] is not None
-                and time.time() - _alpaca_cache["at"] < ALPACA_CACHE_TTL_S):
+        if (
+            _alpaca_cache["data"] is not None
+            and time.time() - _alpaca_cache["at"] < ALPACA_CACHE_TTL_S
+        ):
             return _alpaca_cache["data"]
+
     if not _alpaca_reachable():
         now = time.time()
-        data = {"values": {p: None for p in _ALPACA_PROPS},
-                "status": "NOT_CONNECTED", "updated_at": now}
+        data = {
+            "values": {p: None for p in _ALPACA_PROPS},
+            "status": "NOT_CONNECTED",
+            "updated_at": now,
+        }
         with _alpaca_lock:
             _alpaca_cache.update({"at": now, "data": data})
         return data
-    values, ok_any, ok_all = {}, False, True
+
+    values: Dict[str, Any] = {}
+    ok_any = False
+    ok_all = True
     for prop in _ALPACA_PROPS:
         value, ok = _alpaca_get(prop)
         values[prop] = value
         ok_any = ok_any or ok
         ok_all = ok_all and ok
+
     now = time.time()
     status = "LIVE" if ok_all else ("STALE" if ok_any else "NOT_CONNECTED")
     data = {"values": values, "status": status, "updated_at": now}
@@ -185,8 +164,15 @@ def read_alpaca_snapshot():
     return data
 
 
-def read_stcs_config():
+def read_stcs_config() -> Dict[str, Any]:
     """Read authoritative STCS JSON config (limits/site/offsets)."""
+    with _config_lock:
+        if (
+            _config_cache["data"] is not None
+            and time.time() - _config_cache["at"] < _CONFIG_CACHE_TTL_S
+        ):
+            return _config_cache["data"]
+
     out = {"limits": None, "settings": None, "state": None, "status": "UNKNOWN"}
     try:
         for key, fname in (
@@ -201,26 +187,131 @@ def read_stcs_config():
         out["status"] = "LIVE" if out["limits"] else "NOT_AVAILABLE"
     except Exception:
         out["status"] = "NOT_AVAILABLE"
+
     out["updated_at"] = time.time()
+    with _config_lock:
+        _config_cache.update({"at": time.time(), "data": out})
     return out
 
 
-def read_weather_snapshot():
-    """Return the last passively-received weather datagram with staleness."""
-    ensure_weather_listener()
-    with _weather_lock:
-        cache = dict(_weather_cache)
+# ── WebSocket telemetry client ─────────────────────────────────────────────
+async def _ws_client_loop(stop_event: threading.Event):
+    """Async WebSocket client loop running in a dedicated thread with its own event loop."""
+    global _ws_loop
+    _ws_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_ws_loop)
+
+    try:
+        await _ws_client_inner(stop_event)
+    finally:
+        _ws_loop.close()
+        _ws_loop = None
+
+
+async def _ws_client_inner(stop_event: threading.Event):
+    """Inner async loop for WebSocket connection with reconnection logic."""
+    while not stop_event.is_set():
+        try:
+            async with websockets.connect(
+                TELEMETRY_WS_URL,
+                open_timeout=WS_CONNECT_TIMEOUT_S,
+                ping_interval=10,
+                ping_timeout=5,
+            ) as ws:
+                with _ws_lock:
+                    _ws_cache.update(
+                        {"status": "LIVE", "last_error": None, "updated_at": time.time()}
+                    )
+
+                async for message in ws:
+                    if stop_event.is_set():
+                        break
+                    try:
+                        data = json.loads(message)
+                        if data.get("type") == "telemetry":
+                            with _ws_lock:
+                                _ws_cache.update(
+                                    {
+                                        "payload": data,
+                                        "updated_at": time.time(),
+                                        "status": "LIVE",
+                                        "last_error": None,
+                                    }
+                                )
+                    except json.JSONDecodeError:
+                        pass
+                    except Exception:
+                        pass
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            with _ws_lock:
+                _ws_cache.update(
+                    {"status": "NOT_CONNECTED", "last_error": str(e), "updated_at": time.time()}
+                )
+
+        # Reconnection delay
+        if not stop_event.is_set():
+            await asyncio.sleep(WS_RECONNECT_DELAY_S)
+
+
+def ensure_ws_listener():
+    """Start the WebSocket telemetry client once (idempotent)."""
+    global _ws_thread, _ws_stop_event
+    if _ws_thread is not None and _ws_thread.is_alive():
+        return
+
+    _ws_stop_event = threading.Event()
+    _ws_thread = threading.Thread(
+        target=lambda: asyncio.run(_ws_client_loop(_ws_stop_event)),
+        daemon=True,
+    )
+    _ws_thread.start()
+
+
+def stop_ws_listener():
+    """Stop the WebSocket telemetry client."""
+    global _ws_thread, _ws_stop_event
+    if _ws_stop_event:
+        _ws_stop_event.set()
+    if _ws_thread:
+        _ws_thread.join(timeout=2.0)
+        _ws_thread = None
+    _ws_stop_event = None
+
+
+def read_ws_snapshot() -> Dict[str, Any]:
+    """Return the last WebSocket telemetry broadcast with staleness."""
+    ensure_ws_listener()
+    with _ws_lock:
+        cache = dict(_ws_cache)
+
     age = time.time() - cache.get("updated_at", 0.0)
     payload = cache.get("payload")
+    status = cache.get("status", "NOT_CONNECTED")
+
     if payload is None:
-        status = "NOT_CONNECTED" if cache.get("status") != "NOT_AVAILABLE" else "NOT_AVAILABLE"
+        if status == "NOT_CONNECTED":
+            pass  # keep NOT_CONNECTED
+        else:
+            status = "NOT_CONNECTED"
     else:
-        status = "LIVE" if age <= STALE_AFTER_S else "STALE"
-    return {"values": payload, "status": status, "age_s": age,
-            "updated_at": cache.get("updated_at", 0.0)}
+        if age <= STALE_AFTER_S:
+            status = "LIVE"
+        else:
+            status = "STALE"
+
+    return {
+        "values": payload,
+        "status": status,
+        "age_s": age,
+        "updated_at": cache.get("updated_at", 0.0),
+        "last_error": cache.get("last_error"),
+    }
 
 
-def snapshot_status(age_s: float, connected: bool):
+def snapshot_status(age_s: float, connected: bool) -> str:
     """Classify a cached value as LIVE / STALE / NOT_CONNECTED."""
     if not connected:
         return "NOT_CONNECTED"
@@ -229,5 +320,5 @@ def snapshot_status(age_s: float, connected: bool):
     return "STALE"
 
 
-def utc_now_iso():
+def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()

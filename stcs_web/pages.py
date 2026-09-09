@@ -32,20 +32,17 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from . import auth
 from . import observatory as obs_svc
 from . import obs_store
+from . import command_defs
 from .routes import _csrf_token, _csrf_validate_form, template_response
 
 router = APIRouter(tags=["observatory"])
 
 COMMANDS_ENABLED = os.environ.get("STCS_COMMANDS_ENABLED", "0") == "1"
 
-# Mirror of the existing STCS validation sets (telemetry_server.py:36-52).
-VALID_COMMANDS = {"manual_move", "stop", "tracking_on", "tracking_off",
-                  "dome_cw", "dome_ccw", "dome_off", "heartbeat",
-                  "slewtocoordinatesasync", "park", "emergency_stop",
-                  "synccalibration", "clear_offsets"}
-VALID_SPEEDS = {"COARSE", "FINE_1", "FINE_2"}
-VALID_DIRECTIONS = {"RA": {"EAST", "WEST", "NONE"},
-                    "DEC": {"NORTH", "SOUTH", "NONE"}}
+# Command validation sets (shared definitions)
+VALID_COMMANDS = command_defs.VALID_COMMANDS
+VALID_SPEEDS = command_defs.VALID_SPEEDS
+VALID_DIRECTIONS = command_defs.VALID_DIRECTIONS
 
 
 def _require_user(request: Request):
@@ -64,8 +61,9 @@ def _page_ctx(request: Request, user, snap, extra=None):
         "warn": "ADVISORY — CHECK SAFETY PANEL",
         "crit": "SAFETY CONDITION — REVIEW BEFORE OPERATING",
     }.get(alert_cls, "TELEMETRY UNAVAILABLE — STATE UNKNOWN")
-    alp = (snap.get("alpaca") or {}).get("status", "UNKNOWN")
-    led = "ok" if alp == "LIVE" else ("warn" if alp == "STALE" else "bad")
+    # Use telemetry_status from unified snapshot (prefers WS, falls back to Alpaca)
+    telemetry_status = snap.get("telemetry_status", "UNKNOWN")
+    led = "ok" if telemetry_status == "LIVE" else ("warn" if telemetry_status == "STALE" else "bad")
     ctx = {
         "request": request,
         "username": user["username"],
@@ -88,7 +86,7 @@ def _page_ctx(request: Request, user, snap, extra=None):
 def _system_state(snap):
     if snap.get("mode") == "SIMULATION":
         return "◆ SIMULATION"
-    st = (snap.get("alpaca") or {}).get("status", "UNKNOWN")
+    st = snap.get("telemetry_status", "UNKNOWN")
     if st == "LIVE":
         return "● READY"
     if st == "STALE":
@@ -113,49 +111,96 @@ async def page_control(request: Request):
     if user is None:
         return RedirectResponse(url="/api/login", status_code=302)
     snap = obs_svc.observatory_snapshot()
-    v = snap["alpaca"]["values"]
-    ra = v.get("rightascension")
-    lst = snap["lst"]
-    # HRA = LST - RA (same relation as LegacyDecoder HRA→RA via LST)
-    hra = ((lst - ra) % 24.0) if (lst is not None and ra is not None) else None
+
+    # Use rich telemetry from unified snapshot (prefers WS, falls back to Alpaca)
+    ra = snap.get("ra_hours")
+    dec = snap.get("dec_deg")
+    ha = snap.get("ha_hours")
+    lst = snap.get("lst_hours")
+    alt = snap.get("alt_deg")
+    az = snap.get("az_deg")
+    dome_az = snap.get("dome_az_deg")
+    tracking = snap.get("tracking")
+    slewing = snap.get("slewing")
+    dome_state = snap.get("dome_state")
+    ra_speed = snap.get("ra_speed")
+    ra_direction = snap.get("ra_direction")
+    dec_speed = snap.get("dec_speed")
+    dec_direction = snap.get("dec_direction")
+    safety_limit_active = snap.get("safety_limit_active")
+    safety_limit_message = snap.get("safety_limit_message")
+    cooldown_active = snap.get("cooldown_active")
+    telemetry_source = snap.get("telemetry_source", "NONE")
+
+    # HRA from WebSocket if available, else compute from LST - RA
+    hra = ha if ha is not None else (((lst - ra) % 24.0) if (lst is not None and ra is not None) else None)
+
     import time as _t
-    alp_age = _t.time() - (snap["alpaca"].get("updated_at") or 0.0)
+    # Age based on the active telemetry source
+    ws_age = _t.time() - (snap.get("ws", {}).get("updated_at") or 0.0)
+    alpaca_age = _t.time() - (snap.get("alpaca", {}).get("updated_at") or 0.0)
+    telemetry_age = ws_age if telemetry_source == "WS" else alpaca_age
+
     wvals = snap["weather"].get("values") or {}
-    wx_age = (f"{snap['weather'].get('age_s', 0.0):.1f}s"
-              if wvals else "—")
+    wx_age = (f"{snap['weather'].get('age_s', 0.0):.1f}s" if wvals else "—")
+
+    # Motion state from rich telemetry
+    if slewing is True:
+        motion_state = "SLEWING"
+    elif slewing is False:
+        motion_state = "IDLE"
+    else:
+        motion_state = "UNKNOWN"
+
+    # Dome state from WebSocket
+    if dome_state:
+        dome_state_str = dome_state
+    elif slewing is True:
+        dome_state_str = "MOVING"
+    elif slewing is False:
+        dome_state_str = "IDLE"
+    else:
+        dome_state_str = "UNKNOWN"
+
     ctx = _page_ctx(request, user, snap, {
         "page_title": "Control", "active": "control",
         "ra_hms": obs_svc.fmt_ra_hms(ra),
         "hra_hms": obs_svc.fmt_ra_hms(hra),
-        "dec_dms": obs_svc.fmt_dec_dms(v.get("declination")),
-        "az": obs_svc.fmt_deg(v.get("azimuth")),
-        "alt": obs_svc.fmt_deg(v.get("altitude")),
+        "dec_dms": obs_svc.fmt_dec_dms(dec),
+        "az": obs_svc.fmt_deg(az),
+        "alt": obs_svc.fmt_deg(alt),
         "lst_hms": _hms(lst),
         "jd": f"{snap['jd']:.5f}",
-        "dome_az": "—",
-        "dome_state": ("MOVING" if v.get("slewing")
-                       else ("—" if v.get("slewing") is False else "Unknown")),
-        "dome_sync": "Unknown",
-        "tracking": ("ON" if v.get("tracking") is True
-                     else ("OFF" if v.get("tracking") is False else "UNKNOWN")),
-        "sidereal": ("ON" if v.get("tracking") is True
-                     else ("OFF" if v.get("tracking") is False else "Unknown")),
-        "slewing": v.get("slewing"),
-        "atpark": v.get("atpark"), "athome": v.get("athome"),
-        "motion_state": ("SLEWING" if v.get("slewing") is True
-                         else ("IDLE" if v.get("slewing") is False else "UNKNOWN")),
-        "alp_age": f"{alp_age:.1f}s",
+        "dome_az": obs_svc.fmt_deg(dome_az) if dome_az is not None else "—",
+        "dome_state": dome_state_str,
+        "dome_sync": "Unknown",  # Would need additional telemetry
+        "tracking": ("ON" if tracking is True
+                      else ("OFF" if tracking is False else "UNKNOWN")),
+        "sidereal": ("ON" if tracking is True
+                      else ("OFF" if tracking is False else "Unknown")),
+        "slewing": slewing,
+        "atpark": snap.get("alpaca", {}).get("values", {}).get("atpark"),
+        "athome": snap.get("alpaca", {}).get("values", {}).get("athome"),
+        "motion_state": motion_state,
+        "ra_speed": ra_speed,
+        "ra_direction": ra_direction,
+        "dec_speed": dec_speed,
+        "dec_direction": dec_direction,
+        "safety_limit_active": safety_limit_active,
+        "safety_limit_message": safety_limit_message,
+        "cooldown_active": cooldown_active,
+        "telemetry_age": f"{telemetry_age:.1f}s",
+        "telemetry_source": telemetry_source,
         "wx_age": wx_age,
-        "w_temp": wvals.get("temp_c", "—"),
-        "w_hum": wvals.get("humidity_pct", "—"),
-        "w_dew": wvals.get("dew_point_c", "—"),
         "dec_home": ((snap.get("config") or {}).get("state") or {}).get("dec_home_deg", "—"),
         "ra_off": ((snap.get("config") or {}).get("state") or {}).get("minor_hra_adj", "—"),
         "dec_off": ((snap.get("config") or {}).get("state") or {}).get("minor_dec_adj", "—"),
         "dome_off": ((snap.get("config") or {}).get("state") or {}).get("dome_offset", "—"),
-        "site_lat": v.get("sitelatitude") or "29.36",
-        "site_lon": v.get("sitelongitude") or "79.45",
+        "site_lat": snap.get("alpaca", {}).get("values", {}).get("sitelatitude") or "29.36",
+        "site_lon": snap.get("alpaca", {}).get("values", {}).get("sitelongitude") or "79.45",
         "cmd_result": request.query_params.get("cmd", ""),
+        # Environment/safety breakdown
+        "env": snap.get("environment", {}),
     })
     return template_response("control.html", **ctx)
 
@@ -212,7 +257,7 @@ async def page_history(request: Request):
     detail = None
     if qp.get("obs"):
         try:
-            detail = obs_store.get_observation(int(qp["obs"]), user["username"], user["role"])
+            detail = obs_store.get_observation_with_files(int(qp["obs"]), user["username"], user["role"])
         except Exception:
             detail = None
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
@@ -237,8 +282,18 @@ async def page_camera(request: Request):
     if user is None:
         return RedirectResponse(url="/api/login", status_code=302)
     snap = obs_svc.observatory_snapshot()
+    # Get camera status from the camera service
+    camera_status = {}
+    try:
+        from .camera_service import get_camera_service
+        svc = get_camera_service()
+        if svc:
+            camera_status = svc.get_camera_status()
+    except Exception:
+        camera_status = {"available": False, "state": "NOT_AVAILABLE"}
     return template_response("camera.html", **_page_ctx(
-        request, user, snap, {"page_title": "Camera", "active": "camera"}))
+        request, user, snap, {"page_title": "Camera", "active": "camera",
+                               "camera_status": camera_status}))
 
 
 @router.get("/app/system", include_in_schema=False)
@@ -269,6 +324,8 @@ async def page_system(request: Request):
         "alt_floor": limits.get("min_altitude_deg", "—"),
         "alt_max": limits.get("max_altitude_deg", "—"),
         "site_lat": "29.36", "site_lon": "79.45",
+        "env": snap.get("environment", {}),
+        "env_thresholds": (cfg.get("limits") or {}).get("environment", {}),
     })
     return template_response("system.html", **ctx)
 
@@ -322,16 +379,36 @@ def _recent_audit(limit=50):
 async def api_snapshot(request: Request):
     _require_user(request)
     snap = obs_svc.observatory_snapshot()
-    v = snap["alpaca"]["values"]
-    return {"mode": snap["mode"], "alpaca_status": snap["alpaca"]["status"],
-            "ra_hours": v.get("rightascension"), "dec_deg": v.get("declination"),
-            "lst_hours": snap["lst"], "lst_source": snap["lst_source"],
-            "alt_deg": v.get("altitude"), "az_deg": v.get("azimuth"),
-            "tracking": v.get("tracking"), "slewing": v.get("slewing"),
-            "atpark": v.get("atpark"), "athome": v.get("athome"),
-            "weather": snap["weather"], "safety": snap["safety"],
-            "subsystems": snap["subsystems"],
-            "generated_at": snap["generated_at"]}
+    return {
+        "mode": snap["mode"],
+        "telemetry_status": snap.get("telemetry_status"),
+        "telemetry_source": snap.get("telemetry_source"),
+        "ra_hours": snap.get("ra_hours"),
+        "dec_deg": snap.get("dec_deg"),
+        "ha_hours": snap.get("ha_hours"),
+        "lst_hours": snap.get("lst_hours"),
+        "lst_source": snap.get("lst_source"),
+        "alt_deg": snap.get("alt_deg"),
+        "az_deg": snap.get("az_deg"),
+        "dome_az_deg": snap.get("dome_az_deg"),
+        "tracking": snap.get("tracking"),
+        "slewing": snap.get("slewing"),
+        "ra_speed": snap.get("ra_speed"),
+        "ra_direction": snap.get("ra_direction"),
+        "dec_speed": snap.get("dec_speed"),
+        "dec_direction": snap.get("dec_direction"),
+        "dome_state": snap.get("dome_state"),
+        "safety_limit_active": snap.get("safety_limit_active"),
+        "safety_limit_message": snap.get("safety_limit_message"),
+        "cooldown_active": snap.get("cooldown_active"),
+        "atpark": snap.get("alpaca", {}).get("values", {}).get("atpark"),
+        "athome": snap.get("alpaca", {}).get("values", {}).get("athome"),
+        "weather": snap["weather"],
+        "safety": snap["safety"],
+        "subsystems": snap["subsystems"],
+        "generated_at": snap["generated_at"],
+        "environment": snap.get("environment", {}),
+    }
 
 
 @router.get("/api/history/list", include_in_schema=False)
@@ -352,10 +429,13 @@ async def api_history_list(request: Request):
 @router.get("/api/history/export", include_in_schema=False)
 async def api_history_export(request: Request, fmt: str = "csv"):
     """Export ONLY records the caller is authorized to see."""
+    import logging
+    _log = logging.getLogger("Export")
     user = _require_user(request)
     try:
         res = obs_store.list_observations(user["username"], user["role"], limit=5000)
     except Exception as e:
+        _log.exception("Export query failed")
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
     obs_store.record_audit(user["username"], "observation_export",
                            f"fmt={fmt} count={res['total']}")
@@ -367,55 +447,91 @@ async def api_history_export(request: Request, fmt: str = "csv"):
              o["start"], o["end"], o["duration_s"], o["status"]]
             for o in res["items"]]
     if fmt == "xlsx":
-        from openpyxl import Workbook
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Observations"
-        ws.append(cols)
-        for r in rows:
-            ws.append(r)
-        for col in ws.columns:
-            col[0].font = col[0].font.copy(bold=True)
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-        return StreamingResponse(iter([buf.getvalue()]),
-                                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                 headers={"Content-Disposition":
-                                          "attachment; filename=observations.xlsx"})
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font
+        except ImportError:
+            _log.error("openpyxl not installed")
+            raise HTTPException(status_code=500, detail="Excel export unavailable (openpyxl not installed)")
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Observations"
+            ws.append(cols)
+            for r in rows:
+                ws.append([str(v) if v is not None else "" for v in r])
+            bold = Font(bold=True)
+            for cell in ws[1]:
+                cell.font = bold
+            buf = io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+            content = buf.getvalue()
+            return StreamingResponse(
+                iter([content]),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": "attachment; filename=observations.xlsx"}
+            )
+        except Exception as e:
+            _log.exception("XLSX export failed")
+            raise HTTPException(status_code=500, detail=f"Excel export failed: {e}")
     if fmt == "pdf":
-        from fpdf import FPDF
-        pdf = FPDF(orientation="L", format="A4")
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 10, "ARIES 104 cm — Observation Export", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", "", 9)
-        pdf.cell(0, 6, f"Exported by {user['username']} ({user['role']}) — {len(rows)} record(s), privacy-filtered",
-                 new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(2)
-        widths = [12, 30, 60, 22, 22, 38, 38, 22, 28]
-        pdf.set_font("Helvetica", "B", 8)
-        for i, c in enumerate(cols):
-            pdf.cell(widths[i], 7, c, border=1)
-        pdf.ln()
-        pdf.set_font("Helvetica", "", 8)
-        for r in rows:
-            for i, v in enumerate(r):
-                pdf.cell(widths[i], 6, str(v if v is not None else "—"), border=1)
+        try:
+            from fpdf import FPDF
+        except ImportError:
+            _log.error("fpdf not installed")
+            raise HTTPException(status_code=500, detail="PDF export unavailable (fpdf not installed)")
+        try:
+            pdf = FPDF(orientation="L", format="A4")
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.add_page()
+            pdf.set_font("Helvetica", "B", 14)
+            pdf.cell(0, 10, "ARIES 104 cm Sampurnanand Telescope - Observation Export",
+                     new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(0, 6,
+                     f"Exported by {user['username']} ({user['role']}) - {len(rows)} record(s), privacy-filtered",
+                     new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(2)
+            widths = [12, 30, 60, 22, 22, 38, 38, 22, 28]
+            pdf.set_font("Helvetica", "B", 8)
+            for i, c in enumerate(cols):
+                pdf.cell(widths[i], 7, c, border=1)
             pdf.ln()
-        out = bytes(pdf.output())
-        return StreamingResponse(iter([out]), media_type="application/pdf",
-                                 headers={"Content-Disposition":
-                                          "attachment; filename=observations.pdf"})
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(cols)
-    w.writerows(rows)
-    buf.seek(0)
-    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
-                             headers={"Content-Disposition":
-                                      "attachment; filename=observations.csv"})
+            pdf.set_font("Helvetica", "", 8)
+            for r in rows:
+                for i, v in enumerate(r):
+                    txt = str(v) if v is not None else "-"
+                    pdf.cell(widths[i], 6, txt, border=1)
+                pdf.ln()
+            out = pdf.output()
+            if isinstance(out, str):
+                out = out.encode("latin-1", errors="replace")
+            elif not isinstance(out, bytes):
+                out = bytes(out)
+            return StreamingResponse(
+                iter([out]),
+                media_type="application/pdf",
+                headers={"Content-Disposition": "attachment; filename=observations.pdf"}
+            )
+        except Exception as e:
+            _log.exception("PDF export failed")
+            raise HTTPException(status_code=500, detail=f"PDF export failed: {e}")
+    # Default: CSV
+    try:
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(cols)
+        w.writerows(rows)
+        content = buf.getvalue()
+        return StreamingResponse(
+            iter([content.encode("utf-8")]),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=observations.csv"}
+        )
+    except Exception as e:
+        _log.exception("CSV export failed")
+        raise HTTPException(status_code=500, detail=f"CSV export failed: {e}")
 
 
 # ── Safe command gate (validate first, execute only when enabled) ───────
@@ -510,3 +626,76 @@ async def api_unlock(request: Request):
     obs_svc.release_control_lock(user["username"], user["role"])
     obs_store.record_audit(user["username"], "control_lock", "release")
     return RedirectResponse(url="/app/control", status_code=302)
+
+
+# ── Observation Archive APIs ─────────────────────────────────────────────
+
+@router.post("/api/observations/delete/{obs_id}", include_in_schema=False)
+async def api_delete_observation(request: Request, obs_id: int):
+    """Delete an observation. Scientists can only delete their own."""
+    user = _require_user(request)
+    form = await request.form()
+    if not _csrf_validate_form(form, request):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+    deleted, reason = obs_store.delete_observation(obs_id, user["username"], user["role"])
+    obs_store.record_audit(user["username"], "observation_delete",
+                           f"obs_id={obs_id} deleted={deleted} reason={reason}")
+    if not deleted:
+        raise HTTPException(status_code=403, detail=reason)
+    return RedirectResponse(url="/app/observations", status_code=302)
+
+
+@router.get("/api/observations/summary", include_in_schema=False)
+async def api_observations_summary(request: Request):
+    """Get observation summary statistics."""
+    user = _require_user(request)
+    try:
+        return obs_store.get_observation_summary(user["username"], user["role"])
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+
+@router.get("/api/observations/scientist/{scientist}", include_in_schema=False)
+async def api_observations_scientist(request: Request, scientist: str):
+    """Get observations for a specific scientist (admin only)."""
+    user = _require_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    qp = request.query_params
+    try:
+        return obs_store.list_observations_for_scientist(
+            scientist,
+            limit=min(100, int(qp.get("limit", "25") or 25)),
+            offset=int(qp.get("offset", "0") or 0)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+
+@router.get("/api/admin/scientists", include_in_schema=False)
+async def api_admin_scientists(request: Request):
+    """List all scientists with observation counts (admin only)."""
+    user = _require_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    try:
+        return obs_store.list_scientists()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+
+@router.get("/api/admin/audit", include_in_schema=False)
+async def api_admin_audit(request: Request):
+    """Get audit events (admin only)."""
+    user = _require_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    qp = request.query_params
+    try:
+        return obs_store.get_audit_events(
+            limit=min(200, int(qp.get("limit", "50") or 50)),
+            offset=int(qp.get("offset", "0") or 0),
+            action_filter=qp.get("action", "")
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
