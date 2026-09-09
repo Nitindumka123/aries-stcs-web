@@ -365,10 +365,7 @@ async def command_slew(request: Request):
         username=user["username"],
         role=user["role"],
         command="slewtocoordinatesasync",
-        fields={
-            "ra_deg": float(form_data.get("ra_deg", 0)),
-            "dec_deg": float(form_data.get("dec_deg", 0)),
-        }
+        fields={}
     )
     return _command_response(result)
 

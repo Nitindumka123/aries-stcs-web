@@ -58,36 +58,34 @@
     </div></div>
   </div>
   <div class="col">
-    <div class="sec"><h3>Configured Thresholds <span class="tag">limits.json</span></h3><div class="sec-body">
-      <dl class="kv">
-        <dt>Max humidity</dt><dd>{{ env_thresholds.max_humidity_percent|default('---') }}%</dd>
-        <dt>Max wind</dt><dd>{{ env_thresholds.max_wind_speed_kmh|default('---') }} km/h</dd>
-        <dt>Close dome on rain</dt><dd>{{ 'Yes' if env_thresholds.close_dome_on_rain else 'No' }}</dd>
-        <dt>Min altitude</dt><dd>{{ alt_floor }}&deg;</dd>
-        <dt>Max altitude</dt><dd>{{ alt_max }}&deg;</dd>
-      </dl>
-      <div style="margin-top:6px">
-        <label class="f">Active safety interlocks</label>
-        <p class="note">Altitude safety: ACTIVE (STCS V1 AltitudeSafetyGuard)</p>
-        <p class="note">Humidity interlock: NOT ACTIVE (commented out in STCS V1)</p>
-        <p class="note">Wind interlock: NOT AVAILABLE (no hardware)</p>
-        <p class="note">Rain interlock: NOT AVAILABLE (no hardware)</p>
+<div class="sec"><h3>Configured Thresholds <span class="tag">limits.json</span></h3><div class="sec-body">
+      <div class="table-fixed">
+        <table>
+          <tr><th>PARAMETER</th><th>VALUE</th></tr>
+          <tr><td>Minimum Altitude</td><td>{{ alt_floor }}&deg;</td></tr>
+          <tr><td>Maximum Altitude</td><td>{{ alt_max }}&deg;</td></tr>
+          <tr><td>Maximum Humidity</td><td>{{ env_thresholds.max_humidity_percent|default('---') }}%</td></tr>
+          <tr><td>Maximum Wind</td><td>{{ env_thresholds.max_wind_speed_kmh|default('---') }} km/h</td></tr>
+          <tr><td>Rain Closure</td><td>{{ 'Yes' if env_thresholds.close_dome_on_rain else 'No' }}</td></tr>
+        </table>
       </div>
-      <p class="note mt">Thresholds from stcs_v1/config/limits.json. Safety enforcement in STCS V1.</p>
-    </div></div>
+      <p class="note mt">Thresholds from stcs_v1/config/limits.json. Safety enforcement in STCS V1.</p></div></div>
     <div class="sec"><h3>Event Log <span class="tag">{{ audit|length }} events</span></h3><div class="sec-body scroll">
-      <table class="t"><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
-        {% for e in audit %}<tr><td>{{ e[3] }}</td><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td></tr>{% endfor %}
-      </table>
+      <div class="table-wrapper">
+        <table class="t"><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
+          {% for e in audit %}<tr><td>{{ e[3] }}</td><td>{{ e[0] }}</td><td>{{ e[1] }}</td><td>{{ e[2] }}</td></tr>{% endfor %}
+        </table>
+      </div>
       {% if not audit %}<p class="note mt">No records yet. Sign-ins, sign-outs and command requests are recorded here automatically.</p>{% endif %}
     </div></div>
-    <div class="sec"><h3>Configuration <span class="tag">safe settings</span></h3><div class="sec-body"><dl class="kv">
-      <dt>Mode</dt><dd>{{ snap.mode }}</dd>
-      <dt>Telemetry</dt><dd>Alpaca 11111 &middot; WS 11112</dd>
-      <dt>Commands</dt><dd>{{ 'Armed' if commands_enabled=='YES' else 'Validation only' }}</dd>
-      <dt>Session</dt><dd>120 min &middot; CSRF on</dd>
-    </dl>
-    <p class="note mt">Connection strings, passwords and secret keys are never displayed here.</p></div></div>
+    <div class="sec"><h3>Configuration <span class="tag">safe settings</span></h3><div class="sec-body">
+      <div class="config-grid">
+        <div class="config-row"><span class="config-key">Telescope Mode</span><span class="config-value">{{ snap.mode }}</span></div>
+        <div class="config-row"><span class="config-key">Commands Enabled</span><span class="config-value">{{ 'YES' if commands_enabled=='YES' else 'NO' }}</span></div>
+        <div class="config-row"><span class="config-key">Telemetry Source</span><span class="config-value">{{ snap.get('telemetry_source', 'NONE') }}</span></div>
+        <div class="config-row"><span class="config-key">Database</span><span class="config-value">PostgreSQL</span></div>
+      </div>
+      <p class="note mt">Connection strings, passwords and secret keys are never displayed here.</p></div></div>
   </div>
 </div>
 {% endblock %}

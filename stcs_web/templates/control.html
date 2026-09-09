@@ -21,8 +21,8 @@
     </div></div>
     <div class="sec"><h3>Tracking <span class="tag st {{ 'ok' if tracking=='ON' else 'dim' }}" data-live="tracking">{{ 'TRACKING' if tracking=='ON' else 'NOT TRACKING' }}</span></h3><div class="sec-body">
       <div class="row">
-        <form method="post" action="/api/command/tracking" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="on"><button class="btn primary sm" type="submit">Track ON</button></form>
-        <form method="post" action="/api/command/tracking" style="display:inline"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="off"><button class="btn sm" type="submit">Track OFF</button></form>
+        <form method="post" action="/api/command/tracking" style="display:inline" onsubmit="return handleTrackCommand(this);"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="on"><button class="btn primary sm" type="submit">Track ON</button></form>
+        <form method="post" action="/api/command/tracking" style="display:inline" onsubmit="return handleTrackCommand(this);"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="off"><button class="btn sm" type="submit">Track OFF</button></form>
         <span class="note">Sidereal: {{ sidereal }}</span>
       </div>
     </div></div>
@@ -51,16 +51,12 @@
   <div class="col">
     <div class="sec"><h3>Manual Motion <span class="tag">{{ motion_state }}</span></h3><div class="sec-body">
       <div class="dpad" role="group" aria-label="Telescope direction pad">
-        <span></span>
-        <button class="hold-btn" data-axis="DEC" data-direction="NORTH" title="Move north (DEC+)">&#9650;<br><span style="font-size:8px">N</span></button>
-        <span></span>
-        <button class="hold-btn" data-axis="RA" data-direction="WEST" title="Move west (RA+)">&#9664;<br><span style="font-size:8px">W</span></button>
-        <div class="mid">HOLD<br>TO<br>MOVE</div>
-        <button class="hold-btn" data-axis="RA" data-direction="EAST" title="Move east (RA-)">&#9654;<br><span style="font-size:8px">E</span></button>
-        <span></span>
-        <button class="hold-btn" data-axis="DEC" data-direction="SOUTH" title="Move south (DEC-)">&#9660;<br><span style="font-size:8px">S</span></button>
-        <span></span>
-      </div>
+      <button class="hold-btn north" data-axis="DEC" data-direction="NORTH" title="Move north (DEC+)">N</button>
+      <button class="hold-btn west" data-axis="RA" data-direction="WEST" title="Move west (RA+)">W</button>
+      <div class="mid">HOLD<br>TO<br>MOVE</div>
+      <button class="hold-btn east" data-axis="RA" data-direction="EAST" title="Move east (RA-)">E</button>
+      <button class="hold-btn south" data-axis="DEC" data-direction="SOUTH" title="Move south (DEC-)">S</button>
+    </div>
       <label class="f">RA Speed</label>
       <div class="seg" role="group" aria-label="RA speed" id="ra-speed-group">
         {% for s in ["COARSE","FINE_1","FINE_2"] %}<button class="speed-btn" data-axis="RA" data-speed="{{ s }}" title="RA {{ s }}">{{ s }}</button>{% endfor %}</div>
@@ -68,11 +64,11 @@
       <div class="seg" role="group" aria-label="DEC speed" id="dec-speed-group">
         {% for s in ["COARSE","FINE_1","FINE_2"] %}<button class="speed-btn" data-axis="DEC" data-speed="{{ s }}" title="DEC {{ s }}">{{ s }}</button>{% endfor %}</div>
       <div class="row mt">
-        <form method="post" action="/api/command/stop" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn danger block" type="submit">EMERGENCY STOP</button></form>
+        <form method="post" action="/api/command/stop" style="display:inline;flex:1" onsubmit="return handleStopCommand(this);"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><button class="btn danger block" type="submit">EMERGENCY STOP</button></form>
       </div>
     </div></div>
     <div class="sec"><h3>Go-To Target</h3><div class="sec-body">
-      <form method="post" action="/api/command/slew" onsubmit="return confirm('Slew to this target?');">
+      <form method="post" action="/api/command/slew" onsubmit="return handleSlewCommand(this); return confirm('Slew to this target?');">
         <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
         <div class="row"><div style="flex:1"><label class="f">Target RA (deg)</label><input name="ra_deg" placeholder="189.20"></div>
         <div style="flex:1"><label class="f">Target DEC (deg)</label><input name="dec_deg" placeholder="27.30"></div></div>
@@ -80,7 +76,7 @@
           <button class="btn primary" style="flex:1.4" type="submit">Go To Target</button>
         </div>
       </form>
-      <form method="post" action="/api/command/park" class="mt" onsubmit="return confirm('Park the telescope?');">
+      <form method="post" action="/api/command/park" class="mt" onsubmit="return handleParkCommand(this); return confirm('Park the telescope?');">
         <input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}">
         <button class="btn block" type="submit">Park Telescope</button>
       </form>
@@ -109,12 +105,12 @@
         <div class="tele"><div class="k">SYNC</div><div class="v" style="font-size:13px">{{ dome_sync }}</div></div>
       </div>
       <div class="row mt">
-        <form method="post" action="/api/command/dome" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="CW"><button class="btn sm block" type="submit">&#8635; CW</button></form>
-        <form method="post" action="/api/command/dome" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="OFF"><button class="btn sm block" type="submit">&#9632; Stop</button></form>
-        <form method="post" action="/api/command/dome" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="CCW"><button class="btn sm block" type="submit">&#8634; CCW</button></form>
+        <form method="post" action="/api/command/dome" style="display:inline;flex:1" onsubmit="return handleDomeCommand(this, 'CW');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="CW"><button class="btn sm block" type="submit">&#8635; CW</button></form>
+        <form method="post" action="/api/command/dome" style="display:inline;flex:1" onsubmit="return handleDomeCommand(this, 'OFF');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="OFF"><button class="btn sm block" type="submit">&#9632; Stop</button></form>
+        <form method="post" action="/api/command/dome" style="display:inline;flex:1" onsubmit="return handleDomeCommand(this, 'CCW');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="CCW"><button class="btn sm block" type="submit">&#8634; CCW</button></form>
       </div>
       <div class="row mt">
-        <form method="post" action="/api/command/calibration" style="display:inline;flex:1"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="sync"><button class="btn sm block" type="submit">Sync</button></form>
+        <form method="post" action="/api/command/calibration" style="display:inline;flex:1" onsubmit="return handleCalCommand(this, 'sync');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="sync"><button class="btn sm block" type="submit">Sync</button></form>
         <button class="btn sm" style="flex:1" disabled title="Automatic dome tracking follows once enabled">Auto Track</button>
       </div>
     </div></div>
@@ -129,7 +125,7 @@
       <label class="f">DEC (DMS) / Set DEC</label><input name="dec_dms" placeholder="+27:18:42.6">
       <label class="f">Dome AZ / Set Dome</label><input name="dome_az" placeholder="0.0">
       <div class="row mt"><button class="btn sm" type="submit">Apply Calibration</button></div></form>
-      <form method="post" action="/api/command/calibration" class="mt" onsubmit="return confirm('Clear all offsets?');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="clear_offsets"><button class="btn sm danger" type="submit">Clear Offsets</button></form>
+      <form method="post" action="/api/command/calibration" class="mt" onsubmit="return handleCalCommand(this, 'clear_offsets'); return confirm('Clear all offsets?');"><input type="hidden" name="_stcs_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="clear_offsets"><button class="btn sm danger" type="submit">Clear Offsets</button></form>
     </div></details>
     <div class="sec"><h3>Telemetry Details</h3><div class="sec-body">
       <dl class="kv">
@@ -146,6 +142,27 @@
 
 <script>
 (function() {
+    function showCommandNotification(message, type) {
+        var toast = document.createElement('div');
+        toast.textContent = message;
+        toast.style.cssText = 'position:fixed;bottom:16px;right:16px;padding:8px 14px;border-radius:3px;color:white;z-index:9999;font-size:11px;font-weight:600;background:' +
+            (type === 'error' ? '#b83a3a' : type === 'warn' ? '#c08820' : '#2a7aaa');
+        document.body.appendChild(toast);
+        setTimeout(function() { toast.remove(); }, 5000);
+    }
+
+    function handleCommandResponse(data) {
+        if (data.status === 'COMMANDS_DISABLED') {
+            showCommandNotification(data.message, 'error');
+            return;
+        }
+        if (data.status !== 'ACCEPTED' && data.status !== 'EXECUTED') {
+            showCommandNotification(data.message, 'error');
+            return;
+        }
+        showCommandNotification(data.message, 'ok');
+    }
+
     var holdButtons = document.querySelectorAll('.hold-btn');
     var activeButton = null;
 
@@ -160,10 +177,7 @@
                 'speed': speed
             })
         }).then(function(r) { return r.json(); }).then(function(data) {
-            if (data.status !== 'ACCEPTED' && data.status !== 'EXECUTED') {
-                console.warn('Command rejected:', data.message);
-                showToast(data.message, 'error');
-            }
+            handleCommandResponse(data);
         }).catch(function(e) { console.error('Command failed:', e); });
     }
 
@@ -229,6 +243,81 @@
         var first = group.querySelector('.speed-btn');
         if (first) first.classList.add('active');
     });
+
+    function handleParkCommand(form) {
+        fetch('/api/command/park', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams(new FormData(form))
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            handleCommandResponse(data);
+        }).catch(function(e) { console.error('Command failed:', e); });
+        return false;
+    }
+
+    function handleDomeCommand(form, action) {
+        fetch('/api/command/dome', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+                '_stcs_csrf_token': form.querySelector('input[name="_stcs_csrf_token"]').value,
+                'action': action
+            })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            handleCommandResponse(data);
+        }).catch(function(e) { console.error('Command failed:', e); });
+        return false;
+    }
+
+    function handleCalCommand(form, action) {
+        fetch('/api/command/calibration', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams(new FormData(form))
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            handleCommandResponse(data);
+        }).catch(function(e) { console.error('Command failed:', e); });
+        return false;
+    }
+
+    function handleSlewCommand(form) {
+        fetch('/api/command/slew', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams(new FormData(form))
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            handleCommandResponse(data);
+        }).catch(function(e) { console.error('Command failed:', e); });
+        return false;
+    }
+
+    function handleStopCommand(form) {
+        fetch('/api/command/stop', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+                '_stcs_csrf_token': form.querySelector('input[name="_stcs_csrf_token"]').value
+            })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            handleCommandResponse(data);
+        }).catch(function(e) { console.error('Command failed:', e); });
+        return false;
+    }
+
+    function handleTrackCommand(form) {
+        var action = form.querySelector('input[name="action"]').value;
+        fetch('/api/command/tracking', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+                '_stcs_csrf_token': form.querySelector('input[name="_stcs_csrf_token"]').value,
+                'action': action
+            })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            handleCommandResponse(data);
+        }).catch(function(e) { console.error('Command failed:', e); });
+        return false;
+    }
 
     function showToast(message, type) {
         var toast = document.createElement('div');
