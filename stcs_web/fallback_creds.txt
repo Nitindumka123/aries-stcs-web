@@ -1,0 +1,2 @@
+Admin:$2b$12$LiXOjdPg4o/MNN5Wqxwtj.u.kf4JdjB0Fwd0HEq6Zs8CHCZ2JOTQW:admin
+Scientist1:$2b$12$HEXqZq1aWdpBdivrETk5AOERkuBHP4.RZLlDKq2b/r749DxefU2ua:scientist

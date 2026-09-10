@@ -1,0 +1,11 @@
+timestamp,level,event,message
+2026-09-07 07:33:55.244,ERROR,CONNECTION_FAILED,Auto-discovery failed. No GPS found on any COM port.
+2026-09-07 07:43:17.413,ERROR,CONNECTION_FAILED,Auto-discovery failed. No GPS found on any COM port.
+2026-09-07 13:35:18.088,ERROR,CONNECTION_FAILED,Auto-discovery failed. No GPS found on any COM port.
+2026-09-07 13:35:33.909,INFO,WORKER_STOPPED,GPS worker stopped (application shutdown or manual stop)
+2026-09-07 19:53:15.214,ERROR,CONNECTION_FAILED,Auto-discovery failed. No GPS found on any COM port.
+2026-09-07 21:48:30.001,INFO,WORKER_STOPPED,GPS worker stopped (application shutdown or manual stop)
+2026-09-07 21:56:34.290,ERROR,CONNECTION_FAILED,Auto-discovery failed. No GPS found on any COM port.
+2026-09-07 21:56:52.418,INFO,WORKER_STOPPED,GPS worker stopped (application shutdown or manual stop)
+2026-09-07 22:15:25.105,ERROR,CONNECTION_FAILED,Auto-discovery failed. No GPS found on any COM port.
+2026-09-07 22:15:28.655,INFO,WORKER_STOPPED,GPS worker stopped (application shutdown or manual stop)

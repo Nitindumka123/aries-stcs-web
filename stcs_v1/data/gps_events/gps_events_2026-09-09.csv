@@ -1,0 +1,3 @@
+timestamp,level,event,message
+2026-09-09 07:47:55.468,ERROR,CONNECTION_FAILED,Auto-discovery failed. No GPS found on any COM port.
+2026-09-09 07:48:12.040,INFO,WORKER_STOPPED,GPS worker stopped (application shutdown or manual stop)
