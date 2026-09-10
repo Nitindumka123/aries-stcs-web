@@ -1,0 +1,8 @@
+{
+  "name": "ARIES STCS Web Observatory",
+  "description": "Web observatory platform for the 104 cm Sampurnanand Telescope (ARIES) with telescope control, live telemetry, camera management, and observation archiving.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,566 @@
+<%- include('partials/header') %>
+<div class="control-console" id="control-console-view">
+  <!-- STCS Hardware Disconnect Banner -->
+  <% if (typeof stcs_connected !== 'undefined' && !stcs_connected) { %>
+    <div class="stcs-disconnect-banner" style="grid-column: 1 / -1; margin-bottom: 0.5rem; padding: 0.6rem 1rem; border-radius: 4px; font-family: monospace; font-size: 12px; display: flex; align-items: center; justify-content: space-between; background: #2d1600; border: 1px solid #7c3a00; color: #ffad42;">
+      <div>
+        <strong>STCS DISCONNECTED:</strong> Telescope Control System hardware bus is not connected to this AI Studio container runtime.
+        Physical commands are disabled. Live coordinates and weather sensors show DISCONNECTED / NOT_AVAILABLE.
+      </div>
+      <span style="background: #5a2c00; color: #ffd699; padding: 2px 8px; border-radius: 3px; font-size: 11px;">
+        STCS_COMMANDS_ENABLED=<%= typeof commands_enabled !== 'undefined' && commands_enabled === 'YES' ? '1' : '0' %>
+      </span>
+    </div>
+  <% } %>
+
+  <!-- COLUMN 1: MOUNT COORDINATES, TRACKING & SAFETY -->
+  <section class="console-card card-coordinates" id="card-coordinates">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator live"></span>
+        <h2 class="card-title">Mount Telemetry</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag" data-live="telemetry"><%= snap ? snap.telemetry_status : 'LIVE' %></span>
+        <span class="meta-sub"><%= telemetry_age %> &middot; <%= telemetry_source %></span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Primary Coordinate Matrix -->
+      <div class="coord-hero-grid">
+        <div class="coord-box hero-coord">
+          <span class="coord-label">RIGHT ASCENSION (J2000)</span>
+          <span class="coord-value mono" data-live="ra"><%= ra_hms %></span>
+          <span class="coord-unit">HH:MM:SS</span>
+        </div>
+        <div class="coord-box hero-coord">
+          <span class="coord-label">DECLINATION (J2000)</span>
+          <span class="coord-value mono" data-live="dec"><%= dec_dms %></span>
+          <span class="coord-unit">&plusmn;DD&deg;MM&prime;SS&Prime;</span>
+        </div>
+      </div>
+
+      <!-- Secondary Astronomical Coordinates -->
+      <div class="coord-sub-grid">
+        <div class="coord-box mini-coord">
+          <span class="coord-label">HOUR ANGLE (HA)</span>
+          <span class="coord-value-sm mono" data-live="hra"><%= hra_hms %></span>
+        </div>
+        <div class="coord-box mini-coord">
+          <span class="coord-label">AZIMUTH</span>
+          <span class="coord-value-sm mono" data-live="az"><%= az %></span>
+        </div>
+        <div class="coord-box mini-coord">
+          <span class="coord-label">ALTITUDE</span>
+          <span class="coord-value-sm mono" data-live="alt"><%= alt %></span>
+        </div>
+      </div>
+
+      <div class="coord-sub-grid mt-xs">
+        <div class="coord-box mini-coord">
+          <span class="coord-label">LST (<%= lst_source %>)</span>
+          <span class="coord-value-sm mono" data-live="lst"><%= lst_hms %></span>
+        </div>
+        <div class="coord-box mini-coord">
+          <span class="coord-label">JULIAN DATE</span>
+          <span class="coord-value-sm mono"><%= jd %></span>
+        </div>
+        <div class="coord-box mini-coord">
+          <span class="coord-label">MOTION STATE</span>
+          <span class="coord-value-sm mono st-<%= motion_state === 'IDLE' ? 'ok' : (motion_state === 'TRACKING' ? 'ok' : 'warn') %>" data-live="motion"><%= motion_state %></span>
+        </div>
+      </div>
+
+      <!-- Tracking Control Block -->
+      <div class="section-divider mt-sm">
+        <span class="divider-title">DRIVE & TRACKING</span>
+        <span class="tracking-pill <%= tracking === 'ON' ? 'st-on' : 'st-off' %>" data-live="tracking">
+          <%= tracking === 'ON' ? 'TRACKING ACTIVE' : 'TRACKING OFF' %>
+        </span>
+      </div>
+
+      <div class="tracking-controls-row">
+        <form method="post" action="/api/command/tracking" class="flex-1" onsubmit="return handleTrackCommand(this);">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <input type="hidden" name="action" value="on">
+          <button class="btn-action <%= tracking === 'ON' ? 'btn-active-ok' : '' %>" type="submit" id="btn-track-on">
+            <span class="btn-dot"></span> Track ON
+          </button>
+        </form>
+        <form method="post" action="/api/command/tracking" class="flex-1" onsubmit="return handleTrackCommand(this);">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <input type="hidden" name="action" value="off">
+          <button class="btn-action <%= tracking === 'OFF' ? 'btn-active-dim' : '' %>" type="submit" id="btn-track-off">
+            Track OFF
+          </button>
+        </form>
+        <div class="sidereal-rate-box">
+          <span class="rate-lbl">SIDEREAL:</span>
+          <span class="rate-val mono"><%= sidereal %></span>
+        </div>
+      </div>
+
+      <!-- Safety & Operational Interlocks -->
+      <div class="section-divider mt-sm">
+        <span class="divider-title">SAFETY & INTERLOCKS</span>
+        <span class="safety-state-tag <%= (snap && snap.safety && snap.safety.overall === 'SAFE') ? 'tag-safe' : 'tag-warn' %>">
+          <%= (snap && snap.safety) ? snap.safety.overall : 'SAFE' %>
+        </span>
+      </div>
+
+      <div class="safety-matrix-grid">
+        <div class="safety-cell">
+          <span class="cell-k">Humidity</span>
+          <span class="cell-v st-<%= (env && env.humidity_state === 'SAFE') ? 'ok' : 'crit' %>" data-live="hum-state"><%= (env && env.humidity_state) ? env.humidity_state : 'SAFE' %></span>
+        </div>
+        <div class="safety-cell">
+          <span class="cell-k">Wind</span>
+          <span class="cell-v st-<%= (env && env.wind_state === 'SAFE') ? 'ok' : 'crit' %>" data-live="wind-state"><%= (env && env.wind_state) ? env.wind_state : 'SAFE' %></span>
+        </div>
+        <div class="safety-cell">
+          <span class="cell-k">Rain</span>
+          <span class="cell-v st-<%= (env && env.rain_state === 'SAFE') ? 'ok' : 'crit' %>" data-live="rain-state"><%= (env && env.rain_state) ? env.rain_state : 'SAFE' %></span>
+        </div>
+        <div class="safety-cell">
+          <span class="cell-k">Altitude Floor</span>
+          <span class="cell-v st-<%= (env && env.altitude_state === 'SAFE') ? 'ok' : 'crit' %>" data-live="alt-state"><%= (env && env.altitude_state) ? env.altitude_state : 'SAFE' %></span>
+        </div>
+      </div>
+
+      <!-- Lock Ownership -->
+      <div class="lock-control-bar mt-xs">
+        <div class="lock-status-indicator">
+          <span class="lock-icon">&#128274;</span>
+          <span class="lock-info">Lock: <b id="lock-owner"><%= (snap && snap.control_lock && snap.control_lock.owner) ? snap.control_lock.owner : 'Free' %></b></span>
+        </div>
+        <div class="lock-action-btns">
+          <form method="post" action="/api/command/lock/acquire" style="display:inline">
+            <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+            <button class="btn-micro" type="submit" id="btn-take-lock">Take Lock</button>
+          </form>
+          <form method="post" action="/api/command/lock/release" style="display:inline">
+            <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+            <button class="btn-micro btn-dim" type="submit" id="btn-release-lock">Release</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COLUMN 2: DIRECTIONAL MOTION & TARGET SLEW -->
+  <section class="console-card card-motion" id="card-motion">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator warn"></span>
+        <h2 class="card-title">Motion & Slewing Control</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag <%= motion_state !== 'IDLE' ? 'tag-warn' : 'tag-safe' %>"><%= motion_state %></span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Tactile Telescope D-PAD -->
+      <div class="dpad-container">
+        <div class="dpad-controller" role="group" aria-label="Telescope manual direction pad">
+          <button class="dpad-btn dpad-north hold-btn" data-axis="DEC" data-direction="NORTH" id="btn-dpad-n" title="Move North (DEC+)">
+            <span class="dpad-dir">N</span>
+            <span class="dpad-axis">+DEC</span>
+          </button>
+          <button class="dpad-btn dpad-west hold-btn" data-axis="RA" data-direction="WEST" id="btn-dpad-w" title="Move West (RA+)">
+            <span class="dpad-dir">W</span>
+            <span class="dpad-axis">+RA</span>
+          </button>
+          <div class="dpad-center">
+            <span class="dpad-center-icon">&#9678;</span>
+            <span class="dpad-center-text">HOLD<br>TO MOVE</span>
+          </div>
+          <button class="dpad-btn dpad-east hold-btn" data-axis="RA" data-direction="EAST" id="btn-dpad-e" title="Move East (RA-)">
+            <span class="dpad-dir">E</span>
+            <span class="dpad-axis">-RA</span>
+          </button>
+          <button class="dpad-btn dpad-south hold-btn" data-axis="DEC" data-direction="SOUTH" id="btn-dpad-s" title="Move South (DEC-)">
+            <span class="dpad-dir">S</span>
+            <span class="dpad-axis">-DEC</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Axis Speed Selectors -->
+      <div class="speed-selectors-grid mt-xs">
+        <div class="speed-group">
+          <span class="speed-lbl">RA SLEW SPEED</span>
+          <div class="seg-controller" id="ra-speed-group" role="group">
+            <% for (const s of ["COARSE","FINE1","FINE2"]) { %>
+              <button class="speed-btn <%= s === 'COARSE' ? 'active' : '' %>" data-axis="RA" data-speed="<%= s %>"><%= s %></button>
+            <% } %>
+          </div>
+        </div>
+        <div class="speed-group">
+          <span class="speed-lbl">DEC SLEW SPEED</span>
+          <div class="seg-controller" id="dec-speed-group" role="group">
+            <% for (const s of ["COARSE","FINE1","FINE2"]) { %>
+              <button class="speed-btn <%= s === 'COARSE' ? 'active' : '' %>" data-axis="DEC" data-speed="<%= s %>"><%= s %></button>
+            <% } %>
+          </div>
+        </div>
+      </div>
+
+      <!-- Go-To Target Coordinates -->
+      <div class="section-divider mt-sm">
+        <span class="divider-title">COORDINATE SLEW (GO-TO)</span>
+      </div>
+
+      <form method="post" action="/api/command/slew" class="slew-form" id="slew-form" onsubmit="return handleSlewCommand(this);">
+        <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+        <div class="slew-inputs-row">
+          <div class="slew-field">
+            <label for="slew-ra" class="slew-label">TARGET RA (DEG)</label>
+            <input type="number" step="0.00001" id="slew-ra" name="ra_deg" class="slew-input mono" placeholder="189.2000" required>
+          </div>
+          <div class="slew-field">
+            <label for="slew-dec" class="slew-label">TARGET DEC (DEG)</label>
+            <input type="number" step="0.00001" id="slew-dec" name="dec_deg" class="slew-input mono" placeholder="27.3000" required>
+          </div>
+        </div>
+        <div class="slew-action-row mt-xs">
+          <button type="submit" class="btn-slew-goto" id="btn-slew-submit">
+            <span>Go To Target</span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Parking & Emergency Halt Actions -->
+      <div class="motion-danger-actions mt-xs">
+        <form method="post" action="/api/command/park" class="flex-1" onsubmit="return handleParkCommand(this);">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <button type="submit" class="btn-park" id="btn-park-telescope" title="Move telescope to Zenith Park position">
+            <span>Park Telescope (Zenith)</span>
+          </button>
+        </form>
+        <form method="post" action="/api/command/stop" class="flex-1" onsubmit="return handleStopCommand(this);">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <button type="submit" class="btn-danger-stop" id="btn-stop-telescope" title="Instantly halt active slewing or tracking">
+            <span>HALT MOTION</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Command Feedback Console Box -->
+      <div id="command-feedback" class="cmd-feedback-panel mt-xs" style="display:none;"></div>
+      <% if (typeof cmd_result !== 'undefined' && cmd_result) { %>
+        <div class="cmd-static-feedback mt-xs"><%= cmd_result %></div>
+      <% } %>
+    </div>
+  </section>
+
+  <!-- COLUMN 3: DOME, WEATHER SNAPSHOT & CALIBRATION -->
+  <section class="console-card card-dome" id="card-dome">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator ok"></span>
+        <h2 class="card-title">Dome & Environment</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-safe"><%= dome_state %></span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Dome Status Readouts -->
+      <div class="dome-readout-grid">
+        <div class="dome-metric-box">
+          <span class="metric-lbl">DOME AZIMUTH</span>
+          <span class="metric-val mono"><%= dome_az %>&deg;</span>
+          <span class="metric-sub">Encoder Position</span>
+        </div>
+        <div class="dome-metric-box">
+          <span class="metric-lbl">SLAVED SYNC</span>
+          <span class="metric-val mono st-<%= dome_sync === 'SYNCED' ? 'ok' : 'warn' %>"><%= dome_sync %></span>
+          <span class="metric-sub">Mount Optical Axis</span>
+        </div>
+      </div>
+
+      <!-- Dome Rotation Controls -->
+      <div class="dome-controls-row mt-xs">
+        <form method="post" action="/api/command/dome" class="flex-1" onsubmit="return handleDomeCommand(this, 'CW');">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <input type="hidden" name="action" value="CW">
+          <button class="btn-dome-ctl" type="submit" id="btn-dome-cw" title="Rotate dome Clockwise">&#8635; CW</button>
+        </form>
+        <form method="post" action="/api/command/dome" class="flex-1" onsubmit="return handleDomeCommand(this, 'STOP');">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <input type="hidden" name="action" value="STOP">
+          <button class="btn-dome-ctl btn-dome-stop" type="submit" id="btn-dome-stop" title="Halt dome rotation">&#9632; STOP</button>
+        </form>
+        <form method="post" action="/api/command/dome" class="flex-1" onsubmit="return handleDomeCommand(this, 'CCW');">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <input type="hidden" name="action" value="CCW">
+          <button class="btn-dome-ctl" type="submit" id="btn-dome-ccw" title="Rotate dome Counter-Clockwise">&#8634; CCW</button>
+        </form>
+      </div>
+
+      <div class="dome-sync-row mt-xs">
+        <form method="post" action="/api/command/dome" class="flex-1" onsubmit="return handleDomeCommand(this, 'SYNC');">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <input type="hidden" name="action" value="SYNC">
+          <button class="btn-micro flex-1" type="submit" id="btn-dome-sync">SYNC</button>
+        </form>
+        <form method="post" action="/api/command/dome" class="flex-1" onsubmit="return handleDomeCommand(this, 'AUTO');">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <input type="hidden" name="action" value="AUTO">
+          <button class="btn-micro flex-1" type="submit" id="btn-dome-auto">AUTO</button>
+        </form>
+      </div>
+
+      <!-- Live Weather Snapshot -->
+      <div class="section-divider mt-sm">
+        <span class="divider-title">METEOROLOGICAL SENSORS</span>
+        <span class="weather-pill" data-live="wx-status"><%= (env && env.weather_status) ? env.weather_status : 'NOT_AVAILABLE' %></span>
+      </div>
+
+      <div class="weather-metrics-grid">
+        <div class="weather-metric">
+          <span class="wx-k">AIR TEMP</span>
+          <span class="wx-v mono" data-live="temp"><%= (env && env.temperature != null) ? env.temperature + ' \u00b0C' : 'NOT_AVAILABLE' %></span>
+        </div>
+        <div class="weather-metric">
+          <span class="wx-k">REL HUMIDITY</span>
+          <span class="wx-v mono" data-live="hum"><%= (env && env.humidity != null) ? env.humidity + ' %' : 'NOT_AVAILABLE' %></span>
+        </div>
+        <div class="weather-metric">
+          <span class="wx-k">DEW POINT</span>
+          <span class="wx-v mono" data-live="dew"><%= (env && env.dew_point != null) ? env.dew_point + ' \u00b0C' : 'NOT_AVAILABLE' %></span>
+        </div>
+      </div>
+
+      <!-- Calibration & Offsets Collapsible -->
+      <details class="cal-drawer mt-xs" id="details-calibration">
+        <summary class="cal-summary">
+          <span>CALIBRATION &middot; HOME / OFFSETS</span>
+          <span class="drawer-arrow">&#9662;</span>
+        </summary>
+        <div class="cal-body">
+          <div class="cal-table-wrap">
+            <table class="cal-table">
+              <tr><td>DEC Home Ref</td><td class="mono"><%= dec_home %></td></tr>
+              <tr><td>RA Offset</td><td class="mono"><%= ra_off %></td></tr>
+              <tr><td>DEC Offset</td><td class="mono"><%= dec_off %></td></tr>
+              <tr><td>Dome Offset</td><td class="mono"><%= dome_off %></td></tr>
+            </table>
+          </div>
+
+          <!-- Quick Calibration Commands: DEC HOME, SET HOME, CLEAR OFFSETS -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-top: 6px;">
+            <form method="post" action="/api/command/calibration" onsubmit="return handleCalCommand(this, 'dec_home');">
+              <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+              <input type="hidden" name="action" value="dec_home">
+              <button class="btn-micro w-full" type="submit" id="btn-cal-dec-home" title="Query DEC Home Switch">DEC HOME</button>
+            </form>
+            <form method="post" action="/api/command/calibration" onsubmit="return handleCalCommand(this, 'set_home');">
+              <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+              <input type="hidden" name="action" value="set_home">
+              <button class="btn-micro w-full" type="submit" id="btn-cal-set-home" title="Establish current coordinates as Home reference">SET HOME</button>
+            </form>
+            <form method="post" action="/api/command/calibration" onsubmit="return handleCalCommand(this, 'clear_offsets');">
+              <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+              <input type="hidden" name="action" value="clear_offsets">
+              <button class="btn-micro btn-danger w-full" type="submit" id="btn-cal-clear-offsets" title="Clear all RA/DEC/Dome offsets">CLEAR OFFSETS</button>
+            </form>
+          </div>
+
+          <!-- Detailed Coordinate Calibration Inputs -->
+          <div class="cal-forms-stack mt-xs" style="display: flex; flex-direction: column; gap: 4px;">
+            <form method="post" action="/api/command/calibration" class="cal-input-row" style="display: flex; gap: 4px;" onsubmit="return handleCalCommand(this, 'set_ra');">
+              <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+              <input type="hidden" name="action" value="set_ra">
+              <input name="ra_hms" class="micro-input mono flex-1" placeholder="SET RA (HH:MM:SS)" required>
+              <button class="btn-micro" type="submit">SET RA</button>
+            </form>
+
+            <form method="post" action="/api/command/calibration" class="cal-input-row" style="display: flex; gap: 4px;" onsubmit="return handleCalCommand(this, 'set_dec');">
+              <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+              <input type="hidden" name="action" value="set_dec">
+              <input name="dec_dms" class="micro-input mono flex-1" placeholder="SET DEC (±DD:MM:SS)" required>
+              <button class="btn-micro" type="submit">SET DEC</button>
+            </form>
+
+            <form method="post" action="/api/command/calibration" class="cal-input-row" style="display: flex; gap: 4px;" onsubmit="return handleCalCommand(this, 'set_dome');">
+              <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+              <input type="hidden" name="action" value="set_dome">
+              <input name="dome_az" class="micro-input mono flex-1" placeholder="SET DOME (0-360°)" required>
+              <button class="btn-micro" type="submit">SET DOME</button>
+            </form>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 2px;">
+              <form method="post" action="/api/command/calibration" style="display: flex; gap: 2px;" onsubmit="return handleCalCommand(this, 'ra_offset');">
+                <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+                <input type="hidden" name="action" value="ra_offset">
+                <input name="ra_offset" class="micro-input mono flex-1" placeholder="RA Off (s)" required>
+                <button class="btn-micro" type="submit">RA OFFSET</button>
+              </form>
+
+              <form method="post" action="/api/command/calibration" style="display: flex; gap: 2px;" onsubmit="return handleCalCommand(this, 'dec_offset');">
+                <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+                <input type="hidden" name="action" value="dec_offset">
+                <input name="dec_offset" class="micro-input mono flex-1" placeholder="DEC Off (arcsec)" required>
+                <button class="btn-micro" type="submit">DEC OFFSET</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+</div>
+
+<script>
+(function() {
+    function showNotification(message, type) {
+        var toast = document.createElement('div');
+        toast.className = 'toast-banner toast-' + (type || 'info');
+        toast.innerHTML = '<span class="toast-dot"></span><span>' + message + '</span>';
+        document.body.appendChild(toast);
+        setTimeout(function() { 
+          toast.classList.add('toast-fadeout');
+          setTimeout(function() { toast.remove(); }, 300);
+        }, 4500);
+    }
+
+    function handleCommandResponse(data) {
+        var fb = document.getElementById('command-feedback');
+        if (fb) {
+          fb.style.display = 'block';
+          fb.className = 'cmd-feedback-panel ' + (data.status === 'ACCEPTED' || data.status === 'EXECUTED' ? 'fb-ok' : 'fb-err');
+          fb.innerHTML = '<b>' + (data.status || 'STATUS') + ':</b> ' + (data.message || '');
+        }
+        if (data.status === 'COMMANDS_DISABLED') {
+            showNotification(data.message, 'error');
+            return;
+        }
+        if (data.status !== 'ACCEPTED' && data.status !== 'EXECUTED') {
+            showNotification(data.message, 'error');
+            return;
+        }
+        showNotification(data.message, 'ok');
+    }
+
+    var holdButtons = document.querySelectorAll('.hold-btn');
+
+    function sendManualCommand(axis, direction, speed, isStart) {
+        fetch('/api/command/manual', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({
+                '_stcs_csrf_token': '<%= csrf_token %>',
+                'axis': axis,
+                'direction': isStart ? direction : 'NONE',
+                'speed': speed
+            })
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            handleCommandResponse(data);
+        }).catch(function(e) { console.error('Command failed:', e); });
+    }
+
+    function getSelectedSpeed(axis) {
+        var group = document.getElementById(axis.toLowerCase() + '-speed-group');
+        if (!group) return 'COARSE';
+        var btn = group.querySelector('.speed-btn.active');
+        return btn ? btn.dataset.speed : 'COARSE';
+    }
+
+    holdButtons.forEach(function(btn) {
+        var active = false;
+        function startHold(e) {
+            if (active) return;
+            e.preventDefault();
+            active = true;
+            var axis = btn.dataset.axis;
+            var direction = btn.dataset.direction;
+            var speed = getSelectedSpeed(axis);
+            sendManualCommand(axis, direction, speed, true);
+            btn.classList.add('active-hold');
+        }
+        function stopHold() {
+            if (!active) return;
+            active = false;
+            var axis = btn.dataset.axis;
+            var direction = btn.dataset.direction;
+            var speed = getSelectedSpeed(axis);
+            sendManualCommand(axis, direction, speed, false);
+            btn.classList.remove('active-hold');
+        }
+
+        btn.addEventListener('mousedown', startHold);
+        btn.addEventListener('mouseup', stopHold);
+        btn.addEventListener('mouseleave', stopHold);
+        btn.addEventListener('touchstart', startHold, {passive: false});
+        btn.addEventListener('touchend', stopHold);
+    });
+
+    document.querySelectorAll('.speed-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var group = btn.closest('.seg-controller');
+            group.querySelectorAll('.speed-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+        });
+    });
+
+    window.handleTrackCommand = function(form) {
+        var fd = new FormData(form);
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams(fd)
+        }).then(function(r) { return r.json(); }).then(handleCommandResponse).catch(console.error);
+        return false;
+    };
+
+    window.handleSlewCommand = function(form) {
+        var fd = new FormData(form);
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams(fd)
+        }).then(function(r) { return r.json(); }).then(handleCommandResponse).catch(console.error);
+        return false;
+    };
+
+    window.handleParkCommand = function(form) {
+        if (!confirm('Park telescope at zenith?')) return false;
+        var fd = new FormData(form);
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams(fd)
+        }).then(function(r) { return r.json(); }).then(handleCommandResponse).catch(console.error);
+        return false;
+    };
+
+    window.handleStopCommand = function(form) {
+        var fd = new FormData(form);
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams(fd)
+        }).then(function(r) { return r.json(); }).then(handleCommandResponse).catch(console.error);
+        return false;
+    };
+
+    window.handleDomeCommand = function(form, action) {
+        var fd = new FormData(form);
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams(fd)
+        }).then(function(r) { return r.json(); }).then(handleCommandResponse).catch(console.error);
+        return false;
+    };
+
+    window.handleCalCommand = function(form, action) {
+        var fd = new FormData(form);
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams(fd)
+        }).then(function(r) { return r.json(); }).then(handleCommandResponse).catch(console.error);
+        return false;
+    };
+})();
+</script>
+<%- include('partials/footer') %>

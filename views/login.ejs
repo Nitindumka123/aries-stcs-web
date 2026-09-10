@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="stcs-csrf-token" content="<%= csrf_token %>">
+<title>Sign In — ARIES 104 cm Sampurnanand Telescope</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+<div class="login-viewport">
+  <!-- Top Observatory Facility Header -->
+  <header class="login-top-bar" id="login-top-bar">
+    <div class="login-top-brand">
+      <span class="facility-code">ARIES</span>
+      <span class="facility-name">Aryabhatta Research Institute of Observational Sciences</span>
+    </div>
+    <div class="login-top-station">
+      <span>104 cm Sampurnanand Optical Telescope</span>
+      <span class="station-coords">Manora Peak, Nainital &middot; 29.3619&deg; N, 79.4581&deg; E &middot; Elev 1,927 m</span>
+    </div>
+  </header>
+
+  <!-- Centered container for Authentication Box -->
+  <main class="login-center-wrapper">
+    <div class="login-box" id="login-card">
+      <div class="login-box-header">
+        <div class="login-security-tag">
+          <span class="security-dot"></span>
+          <span>SECURE OPERATIONAL CONSOLE</span>
+        </div>
+        <h1 class="login-title">104 cm Telescope Console</h1>
+        <p class="login-subtitle">STCS v1.4 &middot; Precision Astronomical Instrumentation</p>
+      </div>
+
+      <% if (typeof error !== 'undefined' && error) { %>
+        <div class="login-alert-box" id="login-error-alert" role="alert">
+          <span class="alert-msg"><%= error %></span>
+        </div>
+      <% } %>
+
+      <form method="post" action="/api/login" class="login-form" id="login-form">
+        <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+        
+        <div class="form-group">
+          <label for="username" class="form-label">OPERATOR USERNAME</label>
+          <div class="input-wrapper">
+            <input 
+              type="text" 
+              id="username" 
+              name="username" 
+              class="form-input" 
+              placeholder="Username"
+              autocomplete="username" 
+              required 
+              autofocus>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="password" class="form-label">PASSWORD</label>
+          <div class="input-wrapper">
+            <input 
+              type="password" 
+              id="password" 
+              name="password" 
+              class="form-input has-toggle" 
+              placeholder="Password"
+              autocomplete="current-password" 
+              required>
+            <button type="button" class="btn-pw-toggle" id="btn-toggle-pw" onclick="togglePasswordVisibility()" title="Toggle password visibility">
+              Show
+            </button>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-signin" id="btn-login-submit">
+            <span>Sign In</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<script>
+function togglePasswordVisibility() {
+  const pInput = document.getElementById('password');
+  const btn = document.getElementById('btn-toggle-pw');
+  if (!pInput) return;
+  if (pInput.type === 'password') {
+    pInput.type = 'text';
+    if (btn) btn.textContent = 'Hide';
+  } else {
+    pInput.type = 'password';
+    if (btn) btn.textContent = 'Show';
+  }
+}
+</script>
+</body>
+</html>

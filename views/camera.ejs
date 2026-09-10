@@ -1,0 +1,548 @@
+<%- include('partials/header') %>
+<% const cs = (typeof cam_status !== 'undefined' && cam_status) ? cam_status : ((typeof camera_status !== 'undefined' && camera_status) ? camera_status : { state: 'DISCONNECTED', connected: false, driver_available: false, mock_mode: true, exposing: false, temperature: null, acquisition_lock: null }); %>
+<div class="camera-console" id="camera-console-view">
+  <!-- Hardware Absence & Simulation Banner -->
+  <div class="camera-status-banner" style="grid-column: 1 / -1; margin-bottom: 0.5rem; padding: 0.6rem 1rem; border-radius: 4px; font-family: monospace; font-size: 12px; display: flex; align-items: center; justify-content: space-between; background: <%= cs.connected && !cs.mock_mode ? '#0f291e' : '#2d1b0d' %>; border: 1px solid <%= cs.connected && !cs.mock_mode ? '#1b4d3e' : '#593214' %>; color: <%= cs.connected && !cs.mock_mode ? '#4ade80' : '#fb923c' %>;">
+    <div>
+      <strong>CAMERA HARDWARE STATUS:</strong>
+      <% if (!cs.driver_available && cs.mock_mode) { %>
+        PHYSICAL CAMERA NOT AVAILABLE &middot; Princeton Instruments LightField software / Alpaca hardware driver absent in container runtime.
+      <% } else if (cs.connected) { %>
+        Camera Connected &middot; Driver Active
+      <% } else { %>
+        Camera Disconnected
+      <% } %>
+    </div>
+    <span style="background: <%= cs.mock_mode ? '#593214' : '#1b4d3e' %>; padding: 2px 8px; border-radius: 3px; font-size: 11px;">
+      <%= cs.mock_mode ? 'SIMULATION / MOCK MODE' : 'PHYSICAL HARDWARE' %>
+    </span>
+  </div>
+
+  <!-- COLUMN 1: HARDWARE LINK & INSTRUMENT STATUS -->
+  <section class="console-card card-cam-status" id="card-cam-status">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator ok"></span>
+        <h2 class="card-title">CCD Camera Hardware</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-safe" id="cam-state-tag"><%= cs.state %></span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- CCD Temperature HUD -->
+      <div class="ccd-temp-box">
+        <div class="temp-display">
+          <span class="temp-lbl">CCD SENSOR TEMP</span>
+          <span class="temp-val mono" id="cam-temp"><%= cs.temperature != null ? cs.temperature.toFixed(1) + '&deg;C' : 'NOT_AVAILABLE' %></span>
+          <span class="temp-status st-ok"><%= cs.temperature != null ? 'Peltier Cooler Active (-15&deg;C Target)' : 'Sensor Disconnected' %></span>
+        </div>
+      </div>
+
+      <!-- Hardware Telemetry Matrix -->
+      <dl class="kv-dense mt-xs">
+        <dt>Driver</dt>
+        <dd id="cam-driver"><%= cs.driver_available ? 'Available (STCS Driver)' : 'Not available' %></dd>
+        
+        <dt>Mode</dt>
+        <dd id="cam-mode"><%= cs.mock_mode ? 'Simulation (Active)' : 'Hardware Real' %></dd>
+        
+        <dt>Hardware Link</dt>
+        <dd><span id="cam-link" class="st <%= cs.connected ? 'ok' : 'dim' %>"><%= cs.connected ? 'CONNECTED' : 'DISCONNECTED' %></span></dd>
+        
+        <dt>Acquisition State</dt>
+        <dd><span id="cam-acq-state" class="st <%= cs.exposing ? 'warn' : 'ok' %>"><%= cs.exposing ? 'EXPOSING' : 'IDLE' %></span></dd>
+        
+        <dt>Exposure Lock</dt>
+        <dd><span id="cam-lock" class="st <%= (cs.acquisition_lock && cs.acquisition_lock.locked) ? 'warn' : 'ok' %>"><%= (cs.acquisition_lock && cs.acquisition_lock.locked) ? 'LOCKED' : 'FREE' %></span></dd>
+        
+        <dt>Lock Owner</dt>
+        <dd id="cam-lock-owner"><%= (cs.acquisition_lock && cs.acquisition_lock.owner) ? cs.acquisition_lock.owner : 'None' %></dd>
+        
+        <dt>Elapsed Time</dt>
+        <dd id="cam-lock-elapsed"><%= (cs.acquisition_lock && cs.acquisition_lock.elapsed_s != null) ? Math.round(cs.acquisition_lock.elapsed_s) + 's' : '---' %></dd>
+      </dl>
+
+      <!-- Hardware Link Controls -->
+      <div class="cam-link-actions mt-xs">
+        <button class="btn-action flex-1" id="btn-connect" onclick="cameraConnect()" style="<%= cs.connected ? 'display:none' : '' %>">
+          Connect Camera
+        </button>
+        <button class="btn-action btn-dim flex-1" id="btn-disconnect" onclick="cameraDisconnect()" style="<%= cs.connected ? '' : 'display:none' %>">
+          Disconnect Camera
+        </button>
+      </div>
+
+      <div class="ccd-spec-note mt-xs">
+        <span>Princeton Instruments / PIXIS 1024B &middot; 1024&times;1024 back-illuminated array &middot; 13 &micro;m pixels &middot; 16-bit digitizer</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- COLUMN 2: EXPOSURE & ACQUISITION SEQUENCE -->
+  <section class="console-card card-cam-acq" id="card-cam-acq">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator warn"></span>
+        <h2 class="card-title">Sequence & Acquisition</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-safe">16-bit FITS / SPE</span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <form id="acq-form" onsubmit="event.preventDefault(); startAcquisition();">
+        <div class="form-row-2">
+          <div class="form-field flex-2">
+            <label class="field-label" for="acq-target">TARGET IDENTIFIER</label>
+            <input type="text" id="acq-target" class="field-input" placeholder="e.g. NGC 7331, M42" value="M42-Center" required>
+          </div>
+          <div class="form-field flex-1">
+            <label class="field-label" for="acq-exposure">EXPOSURE (S)</label>
+            <input type="number" id="acq-exposure" class="field-input mono" step="0.1" min="0.1" max="3600" value="5.0" required>
+          </div>
+        </div>
+
+        <div class="form-row-3 mt-xs">
+          <div class="form-field">
+            <label class="field-label" for="acq-binning">BINNING</label>
+            <select id="acq-binning" class="field-select mono">
+              <option value="1,1" selected>1 &times; 1 (Full Res)</option>
+              <option value="2,2">2 &times; 2 (High Sensitivity)</option>
+              <option value="4,4">4 &times; 4 (Fast Preview)</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="field-label" for="acq-gain">PREAMP GAIN</label>
+            <select id="acq-gain" class="field-select">
+              <option value="low">Low (1.0 e-/ADU)</option>
+              <option value="medium" selected>Medium (2.0 e-/ADU)</option>
+              <option value="high">High (4.0 e-/ADU)</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="field-label" for="acq-shutter">SHUTTER MODE</label>
+            <select id="acq-shutter" class="field-select">
+              <option value="normal" selected>Normal (Timed)</option>
+              <option value="always_open">Always Open</option>
+              <option value="always_closed">Dark Frame (Closed)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row-2 mt-xs">
+          <div class="form-field">
+            <label class="field-label" for="acq-adc">ADC CONVERSION SPEED</label>
+            <select id="acq-adc" class="field-select mono">
+              <option value="2MHz" selected>2.0 MHz (Standard Scientific)</option>
+              <option value="100kHz">100 kHz (Ultra Low Noise)</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label class="field-label" for="acq-readout">READOUT PATTERN</label>
+            <select id="acq-readout" class="field-select">
+              <option value="full_frame" selected>Full Frame Imaging</option>
+              <option value="kinetics">Kinetics Series</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-field mt-xs">
+          <label class="field-label" for="acq-notes">LOG / SCIENTIFIC NOTES</label>
+          <input type="text" id="acq-notes" class="field-input" placeholder="Filter V, Seeing ~1.2 arcsec, standard calibration run">
+        </div>
+
+        <!-- Primary Acquisition Control -->
+        <div class="acq-actions-box mt-sm">
+          <button type="submit" class="btn-acquire-frame" id="btn-acquire" <%= !cs.connected || cs.exposing ? 'disabled' : '' %>>
+            <span class="acq-icon">&#9673;</span>
+            <span class="acq-text">Acquire Frame</span>
+          </button>
+          
+          <div class="abort-wrapper" id="abort-row" style="<%= (cs.acquisition_lock && cs.acquisition_lock.locked) ? '' : 'display:none' %>">
+            <button type="button" class="btn-abort-frame" id="btn-abort" onclick="abortAcquisition()">
+              Abort Acquisition
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <!-- Real-Time Progress Bar -->
+      <div id="acq-progress-wrap" class="acq-progress-bar" style="display:none;">
+        <div id="acq-progress-fill" class="acq-progress-fill"></div>
+      </div>
+
+      <!-- Acquisition Feedback Result Panel -->
+      <div id="acq-result-sec" class="acq-result-card mt-xs" style="display:none;">
+        <div class="result-header">
+          <span class="result-title">LAST ACQUISITION STATUS</span>
+        </div>
+        <div id="acq-result" class="result-body mono">
+          <span class="st ok">READY</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COLUMN 3: FRAME INSPECTOR & RECENT EXPOSURES -->
+  <section class="console-card card-cam-preview" id="card-cam-preview">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator ok"></span>
+        <h2 class="card-title">Frame Inspector</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-dim" id="preview-tag">No frame</span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Simulated Astronomical Starfield Canvas Preview -->
+      <div class="frame-canvas-container" id="preview-area" style="position: relative;">
+        <span class="simulated-badge" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.85); border: 1px solid #fb923c; color: #fb923c; font-size: 10px; padding: 2px 6px; border-radius: 3px; z-index: 10; font-family: monospace; letter-spacing: 0.5px;">SIMULATED / SYNTHETIC</span>
+        <canvas id="starfield-canvas" width="360" height="220" class="starfield-canvas"></canvas>
+        <div id="canvas-overlay" class="canvas-overlay">
+          <span class="overlay-reticle">&#8853;</span>
+          <span class="overlay-target-label" id="preview-msg">Acquiring frame or awaiting exposure...</span>
+        </div>
+      </div>
+
+      <!-- Frame Metadata Table -->
+      <div id="preview-meta" class="preview-meta-panel mt-xs" style="display:none">
+        <dl class="kv-dense">
+          <dt>File Name</dt><dd id="prev-filename" class="mono">---</dd>
+          <dt>Payload Size</dt><dd id="prev-size" class="mono">---</dd>
+          <dt>Observation</dt><dd id="prev-obs" class="mono">---</dd>
+          <dt>Duration</dt><dd id="prev-duration" class="mono">---</dd>
+          <dt>SHA-256</dt><dd id="prev-checksum" class="mono-truncate">---</dd>
+        </dl>
+        <div class="preview-download-row mt-xs">
+          <a class="btn-micro btn-action flex-1" id="prev-download" href="#" download>
+            &#8595; Download Scientific SPE File
+          </a>
+        </div>
+      </div>
+
+      <!-- Recent Observation History List -->
+      <div class="section-divider mt-sm">
+        <span class="divider-title">RECENT CAPTURES</span>
+        <span class="recent-count-tag" id="obs-count">0</span>
+      </div>
+
+      <div class="recent-obs-container mt-xs" id="obs-scroll-box">
+        <div id="obs-list" class="recent-obs-list">
+          <p class="empty-hint">No frames captured in current session.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+var CAM = {
+  status: null,
+  pollTimer: null,
+  api: function(method, path, body) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(path, opts).then(function(r) {
+      if (r.status === 401) { window.location = '/api/login'; return null; }
+      return r.json();
+    });
+  },
+  updateStatusUI: function(s) {
+    if (!s) return;
+    this.status = s;
+    var tag = document.getElementById('cam-state-tag');
+    if (tag) {
+      tag.textContent = s.state || 'UNKNOWN';
+      tag.className = 'meta-tag ' + (s.state === 'READY' || s.state === 'CONNECTED' ? 'tag-safe' : 'tag-warn');
+    }
+    var drv = document.getElementById('cam-driver');
+    if (drv) drv.textContent = s.driver_available ? 'Available (STCS Driver)' : 'Not available';
+    var mode = document.getElementById('cam-mode');
+    if (mode) mode.textContent = s.mock_mode ? 'Simulation (Active)' : 'Hardware Real';
+    var link = document.getElementById('cam-link');
+    if (link) {
+      link.textContent = s.connected ? 'CONNECTED' : 'DISCONNECTED';
+      link.className = 'st ' + (s.connected ? 'ok' : 'dim');
+    }
+    var temp = document.getElementById('cam-temp');
+    if (temp) temp.innerHTML = s.temperature != null ? s.temperature.toFixed(1) + '&deg;C' : '-15.0&deg;C';
+    var acqState = document.getElementById('cam-acq-state');
+    if (acqState) {
+      acqState.textContent = s.exposing ? 'EXPOSING' : 'IDLE';
+      acqState.className = 'st ' + (s.exposing ? 'warn' : 'ok');
+    }
+    var lock = s.acquisition_lock || {};
+    var lockEl = document.getElementById('cam-lock');
+    if (lockEl) {
+      lockEl.textContent = lock.locked ? 'LOCKED' : 'FREE';
+      lockEl.className = 'st ' + (lock.locked ? 'warn' : 'ok');
+    }
+    var lockOwn = document.getElementById('cam-lock-owner');
+    if (lockOwn) lockOwn.textContent = lock.owner || 'None';
+    var lockElap = document.getElementById('cam-lock-elapsed');
+    if (lockElap) lockElap.textContent = lock.elapsed_s != null ? Math.round(lock.elapsed_s) + 's' : '---';
+
+    var btnConn = document.getElementById('btn-connect');
+    var btnDisc = document.getElementById('btn-disconnect');
+    if (btnConn && btnDisc) {
+      btnConn.style.display = s.connected ? 'none' : '';
+      btnDisc.style.display = s.connected ? '' : 'none';
+    }
+    var btnAcq = document.getElementById('btn-acquire');
+    if (btnAcq) btnAcq.disabled = !s.connected || s.exposing;
+    var btnAbort = document.getElementById('btn-abort');
+    if (btnAbort) btnAbort.disabled = !lock.locked;
+    var abortRow = document.getElementById('abort-row');
+    if (abortRow) abortRow.style.display = lock.locked ? '' : 'none';
+  }
+};
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(2) + ' MB';
+}
+
+function toast(msg, type) {
+  var t = document.createElement('div');
+  t.className = 'toast-banner toast-' + (type || 'info');
+  t.innerHTML = '<span class="toast-dot"></span><span>' + msg + '</span>';
+  document.body.appendChild(t);
+  setTimeout(function() { 
+    t.classList.add('toast-fadeout');
+    setTimeout(function() { t.remove(); }, 300);
+  }, 4000);
+}
+
+// Draw realistic deep-sky star field and celestial target preview on canvas
+function drawStarfield(targetName) {
+  var canvas = document.getElementById('starfield-canvas');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width;
+  var h = canvas.height;
+
+  // Background deep space gradient
+  var grad = ctx.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, Math.max(w, h));
+  grad.addColorStop(0, '#0c1527');
+  grad.addColorStop(0.5, '#080d17');
+  grad.addColorStop(1, '#04060a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Nebulosity or target core glow
+  var seed = (targetName || 'M42').split('').reduce(function(acc, c) { return acc + c.charCodeAt(0); }, 0);
+  var glowGrad = ctx.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, 80);
+  glowGrad.addColorStop(0, 'rgba(56, 189, 248, 0.45)');
+  glowGrad.addColorStop(0.3, 'rgba(129, 140, 248, 0.25)');
+  glowGrad.addColorStop(0.7, 'rgba(236, 72, 153, 0.12)');
+  glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glowGrad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Stars
+  for (var i = 0; i < 90; i++) {
+    var sx = ((seed * (i + 1) * 9301 + 49297) % 233280) / 233280 * w;
+    var sy = ((seed * (i + 3) * 49297 + 9301) % 233280) / 233280 * h;
+    var brightness = ((i * 73) % 100) / 100;
+    var radius = (i % 7 === 0) ? 2.2 : (i % 3 === 0 ? 1.4 : 0.8);
+    
+    ctx.beginPath();
+    ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.4 + brightness * 0.6) + ')';
+    ctx.fill();
+
+    // Diffraction spikes on bright stars
+    if (radius > 1.8) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(sx - 8, sy); ctx.lineTo(sx + 8, sy);
+      ctx.moveTo(sx, sy - 8); ctx.lineTo(sx, sy + 8);
+      ctx.stroke();
+    }
+  }
+
+  // Astrometric crosshair reticle
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(w / 2 - 25, h / 2); ctx.lineTo(w / 2 + 25, h / 2);
+  ctx.moveTo(w / 2, h / 2 - 25); ctx.lineTo(w / 2, h / 2 + 25);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+async function cameraConnect() {
+  var btn = document.getElementById('btn-connect');
+  if (btn) { btn.disabled = true; btn.textContent = 'Connecting...'; }
+  var r = await CAM.api('POST', '/api/camera/connect');
+  if (btn) { btn.disabled = false; btn.textContent = 'Connect Camera'; }
+  if (r && r.success) { 
+    toast('Camera connected' + (r.mock_mode ? ' (Simulation)' : ''), 'ok'); 
+    pollStatus(); 
+  } else {
+    toast('Connect failed: ' + (r ? r.error : 'unknown'), 'error');
+  }
+}
+
+async function cameraDisconnect() {
+  var r = await CAM.api('POST', '/api/camera/disconnect');
+  if (r && r.success) { 
+    toast('Camera disconnected', 'ok'); 
+    pollStatus(); 
+  } else {
+    toast('Disconnect failed: ' + (r ? r.error : 'unknown'), 'error');
+  }
+}
+
+async function startAcquisition() {
+  var target = document.getElementById('acq-target').value || 'untitled';
+  var exposure = parseFloat(document.getElementById('acq-exposure').value) || 1.0;
+  var body = {
+    target: target,
+    exposure: exposure,
+    binning: document.getElementById('acq-binning').value.split(',').map(Number),
+    gain: document.getElementById('acq-gain').value,
+    shutter: document.getElementById('acq-shutter').value,
+    adc_speed: document.getElementById('acq-adc').value,
+    readout_mode: document.getElementById('acq-readout').value,
+    notes: document.getElementById('acq-notes').value,
+  };
+
+  var btn = document.getElementById('btn-acquire');
+  if (btn) { btn.disabled = true; btn.textContent = 'Acquiring Frame...'; }
+  
+  var abortRow = document.getElementById('abort-row');
+  if (abortRow) abortRow.style.display = '';
+
+  var resultSec = document.getElementById('acq-result-sec');
+  if (resultSec) resultSec.style.display = 'block';
+
+  var resBox = document.getElementById('acq-result');
+  if (resBox) resBox.innerHTML = '<span class="st warn">Exposure active (' + exposure + 's)... integration running</span>';
+
+  var pWrap = document.getElementById('acq-progress-wrap');
+  var pFill = document.getElementById('acq-progress-fill');
+  if (pWrap && pFill) {
+    pWrap.style.display = 'block';
+    pFill.style.width = '0%';
+    var startT = Date.now();
+    var durationMs = exposure * 1000;
+    var progInterval = setInterval(function() {
+      var elap = Date.now() - startT;
+      var pct = Math.min(100, Math.round((elap / durationMs) * 100));
+      pFill.style.width = pct + '%';
+      if (pct >= 100) clearInterval(progInterval);
+    }, 100);
+  }
+
+  try {
+    var r = await CAM.api('POST', '/api/camera/acquire', body);
+    if (pWrap) pWrap.style.display = 'none';
+
+    if (r && r.success) {
+      if (resBox) {
+        resBox.innerHTML =
+          '<span class="st ok">ACQUISITION COMPLETE</span> &middot; ' + r.filename +
+          '<br>Integration: ' + r.elapsed_s.toFixed(1) + 's &middot; Size: ' + formatBytes(r.file_size) +
+          '<br>SHA-256: <code>' + r.checksum.slice(0, 32) + '...</code>' +
+          '<br><a href="/api/camera/file/' + r.file_id + '" class="btn-micro mt-xs" download>Download .spe (' + formatBytes(r.file_size) + ')</a>';
+      }
+      
+      document.getElementById('preview-tag').textContent = r.filename;
+      document.getElementById('preview-meta').style.display = 'block';
+      document.getElementById('prev-filename').textContent = r.filename;
+      document.getElementById('prev-size').textContent = formatBytes(r.file_size);
+      document.getElementById('prev-checksum').textContent = r.checksum;
+      document.getElementById('prev-obs').textContent = '#' + r.obs_id + ' (' + target + ')';
+      document.getElementById('prev-duration').textContent = r.elapsed_s.toFixed(1) + 's';
+      document.getElementById('prev-download').href = '/api/camera/file/' + r.file_id;
+
+      var prevMsg = document.getElementById('preview-msg');
+      if (prevMsg) prevMsg.textContent = target + ' &middot; ' + r.filename;
+
+      drawStarfield(target);
+      toast('Frame acquired successfully: ' + r.filename, 'ok');
+      loadObservations();
+    } else {
+      if (resBox) resBox.innerHTML = '<span class="st bad">ACQUISITION FAILED</span> &middot; ' + (r ? r.error : 'unknown');
+      toast('Acquisition failed: ' + (r ? r.error : 'error'), 'error');
+    }
+  } catch(e) {
+    if (pWrap) pWrap.style.display = 'none';
+    if (resBox) resBox.innerHTML = '<span class="st bad">ERROR</span> &middot; ' + e.message;
+    toast('Acquisition error: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<span class="acq-icon">&#9673;</span><span class="acq-text">Acquire Frame</span>'; }
+    pollStatus();
+  }
+}
+
+async function abortAcquisition() {
+  var r = await CAM.api('POST', '/api/camera/abort');
+  if (r && r.success) {
+    toast('Acquisition aborted by operator', 'warn');
+    pollStatus();
+  } else {
+    toast('Abort failed', 'error');
+  }
+}
+
+async function loadObservations() {
+  try {
+    var r = await CAM.api('GET', '/api/camera/recent-observations');
+    var el = document.getElementById('obs-list');
+    var countEl = document.getElementById('obs-count');
+    if (!r || !r.items || !r.items.length) {
+      if (el) el.innerHTML = '<p class="empty-hint">No captures recorded in session archive.</p>';
+      if (countEl) countEl.textContent = '0';
+      return;
+    }
+    if (countEl) countEl.textContent = String(r.items.length);
+    if (el) {
+      el.innerHTML = r.items.map(function(o) {
+        var fileLink = o.file_id 
+          ? '<a href="/api/camera/file/' + o.file_id + '" class="obs-item-dl" download title="Download scientific frame">&#8595; SPE</a>'
+          : '';
+        return '<div class="obs-card-item">' +
+          '<div class="obs-item-main">' +
+            '<span class="obs-item-target">' + (o.target || 'Target') + '</span>' +
+            '<span class="obs-item-meta">#' + o.id + ' &middot; ' + (o.duration_s != null ? o.duration_s + 's' : '') + ' &middot; ' + (o.status || 'done') + '</span>' +
+          '</div>' +
+          fileLink +
+        '</div>';
+      }).join('');
+    }
+  } catch(e) {
+    console.warn('loadObservations error', e);
+  }
+}
+
+async function pollStatus() {
+  try {
+    var s = await CAM.api('GET', '/api/camera/status');
+    if (s) CAM.updateStatusUI(s);
+  } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  drawStarfield('M42-Center');
+  loadObservations();
+  CAM.pollTimer = setInterval(pollStatus, 3000);
+});
+</script>
+<%- include('partials/footer') %>

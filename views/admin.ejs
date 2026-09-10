@@ -1,0 +1,198 @@
+<%- include('partials/header') %>
+<div class="admin-console" id="admin-workspace-view">
+  <!-- LEFT COLUMN: ACCESS CONTROL & USER MANAGEMENT -->
+  <section class="console-card card-admin-users" id="card-admin-users">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator ok"></span>
+        <h2 class="card-title">Access Control & Credentials</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-safe">RBAC Administration</span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <% if (pending && pending.length) { %>
+      <!-- Pending Approvals Banner -->
+      <div class="pending-approvals-box mb-sm">
+        <div class="pending-hdr">
+          <span class="pending-title">PENDING USER REGISTRATIONS</span>
+          <span class="status-badge badge-warn"><%= pending.length %> PENDING</span>
+        </div>
+        <table class="archive-data-table mt-xs">
+          <thead>
+            <tr><th>USERNAME</th><th>ROLE</th><th>DATE</th><th>DECISION</th></tr>
+          </thead>
+          <tbody>
+            <% for (const u of pending) { %>
+              <tr>
+                <td class="mono"><b><%= u.username %></b></td>
+                <td><%= u.role %></td>
+                <td class="mono"><%= u.created_at %></td>
+                <td>
+                  <div class="row-compact">
+                    <form method="post" action="/api/admin/approve" style="display:inline">
+                      <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+                      <input type="hidden" name="user_id" value="<%= u.id %>">
+                      <input type="hidden" name="action" value="approve">
+                      <button class="btn-micro" type="submit">Approve</button>
+                    </form>
+                    <form method="post" action="/api/admin/approve" style="display:inline">
+                      <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+                      <input type="hidden" name="user_id" value="<%= u.id %>">
+                      <input type="hidden" name="action" value="reject">
+                      <button class="btn-danger-micro" type="submit">Reject</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+      <% } %>
+
+      <!-- Create New User Account -->
+      <div class="admin-form-group">
+        <span class="divider-title">PROVISION NEW USER ACCOUNT</span>
+        <form method="post" action="/api/admin/users" class="admin-user-form mt-xs">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <div class="form-row-3">
+            <div class="form-field flex-1">
+              <label class="field-label" for="new-username">USERNAME</label>
+              <input type="text" id="new-username" name="username" class="field-input" placeholder="e.g. scientist_b" required>
+            </div>
+            <div class="form-field flex-1">
+              <label class="field-label" for="new-password">PASSWORD</label>
+              <input type="password" id="new-password" name="password" class="field-input" placeholder="Secure password" required>
+            </div>
+            <div class="form-field flex-1">
+              <label class="field-label" for="new-role">ROLE</label>
+              <select id="new-role" name="role" class="field-select">
+                <option value="scientist" selected>Scientist</option>
+                <option value="operator">Operator</option>
+                <option value="engineer">Engineer</option>
+                <option value="admin">Administrator</option>
+              </select>
+            </div>
+          </div>
+          <div class="mt-xs">
+            <button type="submit" class="btn-action" id="btn-create-user">Create User Account</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Password Reset -->
+      <div class="admin-form-group mt-sm">
+        <span class="divider-title">CREDENTIAL RESET</span>
+        <form method="post" action="/api/admin/password" class="admin-user-form mt-xs">
+          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+          <div class="form-row-2">
+            <div class="form-field flex-1">
+              <label class="field-label" for="reset-username">TARGET USERNAME</label>
+              <input type="text" id="reset-username" name="username" class="field-input" placeholder="Existing username" required>
+            </div>
+            <div class="form-field flex-1">
+              <label class="field-label" for="reset-password">NEW PASSWORD</label>
+              <input type="password" id="reset-password" name="new_password" class="field-input" placeholder="New credentials" required>
+            </div>
+          </div>
+          <div class="mt-xs">
+            <button type="submit" class="btn-action btn-dim" id="btn-reset-password">Reset User Password</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT COLUMN: SCIENTISTS & AUDIT DRILLDOWN -->
+  <section class="console-card card-admin-audit" id="card-admin-audit">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator ok"></span>
+        <h2 class="card-title">Scientific Personnel Audit</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-safe">Observational Records</span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <div class="scientists-list-container" id="scientist-list">
+        <p class="empty-hint">Loading scientists directory...</p>
+      </div>
+
+      <!-- Observations Drilldown Sub-Panel -->
+      <div class="sci-drilldown-panel mt-sm" id="sci-obs-sec" style="display:none">
+        <div class="drilldown-header">
+          <span class="drilldown-title">OBSERVATIONS &middot; <span id="sci-obs-title" class="mono text-cyan"></span></span>
+        </div>
+        <div class="drilldown-table-wrap mt-xs">
+          <table class="archive-data-table" id="sci-obs-table"></table>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function() {
+  async function loadScientists() {
+    try {
+      var r = await fetch('/api/admin/scientists', {credentials: 'same-origin'});
+      if (!r.ok) return;
+      var data = await r.json();
+      var el = document.getElementById('scientist-list');
+      if (!data.length) { el.innerHTML = '<p class="empty-hint">No registered scientists found.</p>'; return; }
+      el.innerHTML = data.map(function(s) {
+        return '<div class="admin-sci-row" data-sci="' + esc(s.username) + '">' +
+          '<div class="sci-info">' +
+            '<span class="sci-name mono">' + esc(s.username) + '</span>' +
+            '<span class="sci-role-badge">Scientist</span>' +
+          '</div>' +
+          '<div class="sci-stats">' +
+            '<span class="sci-count mono">' + s.observation_count + ' obs</span>' +
+            (s.last_observation ? '<span class="sci-last mono">' + s.last_observation + '</span>' : '') +
+          '</div>' +
+        '</div>';
+      }).join('');
+      el.querySelectorAll('.admin-sci-row').forEach(function(item) {
+        item.addEventListener('click', function() { loadSciObs(item.dataset.sci); });
+      });
+    } catch(e) {}
+  }
+
+  async function loadSciObs(scientist) {
+    var sec = document.getElementById('sci-obs-sec');
+    var title = document.getElementById('sci-obs-title');
+    var table = document.getElementById('sci-obs-table');
+    sec.style.display = 'block';
+    title.textContent = scientist;
+    document.querySelectorAll('.admin-sci-row').forEach(function(i) {
+      i.classList.toggle('active', i.dataset.sci === scientist);
+    });
+    try {
+      var r = await fetch('/api/observations/scientist/' + encodeURIComponent(scientist), {credentials: 'same-origin'});
+      if (!r.ok) return;
+      var data = await r.json();
+      if (!data.items || !data.items.length) {
+        table.innerHTML = '<thead><tr><th>STATUS</th></tr></thead><tbody><tr><td class="empty-cell">No observations recorded by ' + esc(scientist) + '.</td></tr></tbody>';
+        return;
+      }
+      var rows = data.items.map(function(o) {
+        return '<tr><td><a href="/app/observations?obs=' + o.id + '" class="mono obs-id-link">#' + o.id + '</a></td>' +
+        '<td><b>' + esc(o.target) + '</b></td><td class="mono">' + o.start + '</td>' +
+        '<td class="mono">' + (o.duration_s != null ? o.duration_s + 's' : '---') + '</td>' +
+        '<td><span class="status-badge badge-' + (o.status === 'completed' ? 'ok' : 'warn') + '">' + o.status + '</span></td></tr>';
+      }).join('');
+      table.innerHTML = '<thead><tr><th>ID</th><th>TARGET</th><th>START</th><th>DURATION</th><th>STATUS</th></tr></thead><tbody>' + rows + '</tbody>';
+    } catch(e) {}
+  }
+
+  function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  loadScientists();
+})();
+</script>
+<%- include('partials/footer') %>

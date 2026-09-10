@@ -1,0 +1,320 @@
+<%- include('partials/header') %>
+<div class="observations-workspace" id="observations-view">
+  <% if (typeof db_available !== 'undefined' && !db_available) { %>
+    <div class="db-status-banner warning" style="margin-bottom: 0.5rem; padding: 0.6rem 1rem; background: #2d1600; border: 1px solid #7c3a00; border-radius: 4px; color: #ffad42; display: flex; align-items: center; justify-content: space-between; font-family: monospace; font-size: 12px;">
+      <div>
+        <strong>DATABASE UNAVAILABLE:</strong> PostgreSQL (<%= typeof db_host !== 'undefined' ? db_host : 'localhost' %>:<%= typeof db_port !== 'undefined' ? db_port : 5432 %>) is unreachable in container.
+        Displaying cached development observation catalog.
+      </div>
+      <span class="badge-fallback" style="background: #5a2c00; color: #ffd699; padding: 2px 6px; border-radius: 3px; font-size: 11px;">DEVELOPMENT FALLBACK ACTIVE</span>
+    </div>
+  <% } %>
+
+  <!-- Top Scientific Archive Summary Ribbon -->
+  <div class="archive-summary-bar">
+    <div class="summary-metrics-group">
+      <div class="metric-item">
+        <span class="metric-num mono"><%= summary.total %></span>
+        <span class="metric-text">OBSERVATIONS</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-num mono"><%= summary.hours %></span>
+        <span class="metric-text">HOURS INTEGRATED</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-num mono"><%= summary.targets %></span>
+        <span class="metric-text">UNIQUE TARGETS</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-text">LATEST:</span>
+        <span class="metric-num mono target-highlight"><%= summary.latest || 'None' %></span>
+      </div>
+    </div>
+
+    <div class="export-actions-group">
+      <span class="export-lbl">EXPORT ARCHIVE:</span>
+      <a class="btn-export" href="/api/history/export?fmt=csv" title="Download CSV Archive">&#8595; CSV</a>
+      <a class="btn-export" href="/api/history/export?fmt=xlsx" title="Download Excel Format">&#8595; Excel</a>
+      <a class="btn-export" href="/api/history/export?fmt=pdf" title="Download PDF Report">&#8595; PDF</a>
+    </div>
+  </div>
+
+  <!-- Archive Content Split View -->
+  <div class="archive-layout-split">
+    <!-- Filter Sidebar (Fixed Width 260px) -->
+    <aside class="archive-filter-panel" id="archive-filters">
+      <div class="filter-header">
+        <h3 class="filter-title">Archive Query Filters</h3>
+      </div>
+      
+      <form method="get" action="/app/observations" class="filter-form">
+        <div class="form-field">
+          <label class="field-label" for="filter-q">TARGET IDENTIFIER / NOTES</label>
+          <input type="text" id="filter-q" name="q" class="field-input" value="<%= q || '' %>" placeholder="e.g. NGC, M42, V-band">
+        </div>
+
+        <div class="form-field mt-xs">
+          <label class="field-label" for="filter-status">ACQUISITION STATUS</label>
+          <select id="filter-status" name="status" class="field-select">
+            <option value="">All Statuses</option>
+            <option value="completed" <%= status_f === 'completed' ? 'selected' : '' %>>Completed</option>
+            <option value="in_progress" <%= status_f === 'in_progress' ? 'selected' : '' %>>In Progress</option>
+            <option value="failed" <%= status_f === 'failed' ? 'selected' : '' %>>Failed</option>
+            <option value="aborted" <%= status_f === 'aborted' ? 'selected' : '' %>>Aborted</option>
+          </select>
+        </div>
+
+        <div class="form-row-2 mt-xs">
+          <div class="form-field">
+            <label class="field-label" for="filter-from">DATE FROM</label>
+            <input type="date" id="filter-from" name="from" class="field-input mono" value="<%= date_from || '' %>">
+          </div>
+          <div class="form-field">
+            <label class="field-label" for="filter-to">DATE TO</label>
+            <input type="date" id="filter-to" name="to" class="field-input mono" value="<%= date_to || '' %>">
+          </div>
+        </div>
+
+        <% if (role === 'admin') { %>
+        <div class="form-field mt-xs">
+          <label class="field-label" for="filter-owner">OBSERVER (ADMIN AUDIT)</label>
+          <input type="text" id="filter-owner" name="owner" class="field-input" value="<%= owner_filter || '' %>" placeholder="Filter by scientist username">
+        </div>
+        <% } %>
+
+        <div class="filter-btn-row mt-sm">
+          <button type="submit" class="btn-filter-apply flex-1" id="btn-apply-filters">Apply Query</button>
+          <a href="/app/observations" class="btn-micro btn-dim">Reset</a>
+        </div>
+
+        <div class="quick-ranges-box mt-sm">
+          <span class="quick-range-title">QUICK DATE PRESETS:</span>
+          <div class="quick-preset-btns">
+            <a class="btn-preset" href="/app/observations?from=<%= today %>">Today</a>
+            <a class="btn-preset" href="/app/observations?from=<%= week_ago %>">7 Days</a>
+            <a class="btn-preset" href="/app/observations?from=<%= month_ago %>">30 Days</a>
+          </div>
+        </div>
+      </form>
+
+      <div class="filter-footer-note mt-sm">
+        <span><%= role === 'admin' ? 'Administrator access: all scientific records visible.' : 'Scientist access: viewing authorized research sessions.' %></span>
+      </div>
+    </aside>
+
+    <!-- Main Historical Archive Area (Intentional Scroll Allowed) -->
+    <section class="archive-main-viewport" id="archive-records">
+      <% if (!db_ok) { %>
+        <div class="archive-banner-warn">Archive database operating in local storage mode.</div>
+      <% } %>
+
+      <% if (detail) { %>
+      <!-- OBSERVATION DETAIL INSPECTION VIEW -->
+      <article class="observation-detail-card" id="obs-detail-<%= detail.id %>">
+        <div class="detail-header-bar">
+          <div class="detail-title-group">
+            <a href="/app/observations" class="btn-back-link" title="Return to Archive List">&larr; Return to Archive</a>
+            <h2 class="detail-obs-title">Observation Record #<%= detail.id %> &middot; <span class="detail-target-name"><%= detail.target %></span></h2>
+          </div>
+          <span class="status-badge-lg badge-<%= detail.status === 'completed' ? 'ok' : (detail.status === 'in_progress' ? 'warn' : 'bad') %>">
+            <%= detail.status ? detail.status.toUpperCase() : 'UNKNOWN' %>
+          </span>
+        </div>
+
+        <!-- Key Observational Parameters -->
+        <div class="detail-key-metrics mt-sm">
+          <div class="metric-tile">
+            <span class="tile-k">OBSERVER</span>
+            <span class="tile-v mono"><%= detail.owner %></span>
+          </div>
+          <div class="metric-tile">
+            <span class="tile-k">EXPOSURE DURATION</span>
+            <span class="tile-v mono"><%= detail.duration_s != null ? detail.duration_s + ' s' : '---' %></span>
+          </div>
+          <div class="metric-tile">
+            <span class="tile-k">COORDINATES (RA / DEC)</span>
+            <span class="tile-v mono"><%= detail.ra_deg %>&deg; / <%= detail.dec_deg %>&deg;</span>
+          </div>
+          <div class="metric-tile">
+            <span class="tile-k">TIMESTAMP RANGE</span>
+            <span class="tile-v mono" style="font-size:11px"><%= detail.start %> &rarr; <%= detail.end || 'Active' %></span>
+          </div>
+        </div>
+
+        <% if (detail.notes) { %>
+        <div class="detail-notes-box mt-xs">
+          <span class="notes-lbl">OBSERVER LOG NOTES:</span>
+          <p class="notes-body"><%= detail.notes %></p>
+        </div>
+        <% } %>
+
+        <!-- Telescope & Weather Environmental Snapshot at Exposure -->
+        <% if (detail.telescope_state) { %>
+        <div class="detail-sub-section mt-sm">
+          <h4 class="sub-section-title">Observatory & Instrument State at Exposure</h4>
+          <div class="state-snapshot-grid">
+            <% for (const [k, v] of Object.entries(detail.telescope_state)) { %>
+              <% if (v != null && k !== 'weather') { %>
+                <div class="state-cell">
+                  <span class="state-k"><%= k.replace(/_/g, ' ') %></span>
+                  <span class="state-v mono"><%= typeof v === 'object' ? JSON.stringify(v) : v %></span>
+                </div>
+              <% } %>
+            <% } %>
+          </div>
+
+          <% if (detail.telescope_state.weather) { %>
+          <h5 class="weather-sub-title mt-xs">Atmospheric Conditions</h5>
+          <div class="state-snapshot-grid">
+            <% for (const [wk, wv] of Object.entries(detail.telescope_state.weather)) { %>
+              <% if (wv != null) { %>
+                <div class="state-cell">
+                  <span class="state-k"><%= wk.replace(/_/g, ' ') %></span>
+                  <span class="state-v mono"><%= wv %></span>
+                </div>
+              <% } %>
+            <% } %>
+          </div>
+          <% } %>
+        </div>
+        <% } %>
+
+        <!-- Event Timeline -->
+        <div class="detail-sub-section mt-sm">
+          <h4 class="sub-section-title">Acquisition Event Sequence</h4>
+          <table class="archive-data-table">
+            <thead>
+              <tr><th>TIMESTAMP</th><th>ACTION / EVENT DESCRIPTOR</th></tr>
+            </thead>
+            <tbody>
+              <% if (detail.start) { %>
+                <tr><td class="mono"><%= detail.start %></td><td>Observation sequence initiated by <%= detail.owner %></td></tr>
+              <% } %>
+              <% if (detail.files && detail.files.length) { %>
+                <% for (const f of detail.files) { %>
+                  <tr><td class="mono"><%= f.created_at || '---' %></td><td>Raw frame captured and written: <code><%= f.filename %></code> (<%= (f.file_size ? (f.file_size / 1048576).toFixed(2) + ' MB' : '---') %>)</td></tr>
+                <% } %>
+              <% } %>
+              <% if (detail.end) { %>
+                <tr><td class="mono"><%= detail.end %></td><td>Observation completed with status: <b><%= detail.status %></b></td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Associated Scientific Data Files -->
+        <div class="detail-sub-section mt-sm">
+          <h4 class="sub-section-title">Scientific Data Files (<%= (detail.files || []).length %>)</h4>
+          <% if (detail.files && detail.files.length) { %>
+          <table class="archive-data-table">
+            <thead>
+              <tr>
+                <th>FILENAME</th>
+                <th>FORMAT</th>
+                <th>PAYLOAD</th>
+                <th>SHA-256 INTEGRITY CHECKSUM</th>
+                <th>ACTION</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% for (const f of detail.files) { %>
+                <tr>
+                  <td class="mono"><b><%= f.filename %></b></td>
+                  <td><%= f.kind %></td>
+                  <td class="mono"><%= f.file_size ? (f.file_size / 1048576).toFixed(2) + ' MB' : '---' %></td>
+                  <td class="mono checksum-cell" title="<%= f.checksum %>"><%= f.checksum || '---' %></td>
+                  <td>
+                    <a href="/api/camera/file/<%= f.id %>" class="btn-micro" download title="Download raw scientific file">&#8595; Download</a>
+                  </td>
+                </tr>
+              <% } %>
+            </tbody>
+          </table>
+          <% } else { %>
+            <p class="empty-hint">No files attached to this observation record.</p>
+          <% } %>
+        </div>
+
+        <!-- Detail Actions -->
+        <div class="detail-footer-actions mt-sm">
+          <a class="btn-action btn-dim" href="/app/observations">&larr; Back to Records List</a>
+          <span class="flex-spacer"></span>
+          <form method="post" action="/api/observations/delete/<%= detail.id %>" onsubmit="return confirm('PERMANENTLY DELETE Observation #<%= detail.id %>?\nThis action cannot be undone.');">
+            <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+            <button class="btn-danger-micro" type="submit">Delete Observation</button>
+          </form>
+        </div>
+      </article>
+
+      <% } else { %>
+      <!-- ARCHIVE DATA TABLE VIEW -->
+      <div class="archive-table-container">
+        <table class="archive-data-table" id="archive-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>START TIME (UTC)</th>
+              <th>TARGET OBJECT</th>
+              <th>RA (J2000)</th>
+              <th>DEC (J2000)</th>
+              <th>EXP DURATION</th>
+              <th>STATUS</th>
+              <th>OBSERVER</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (!items || !items.length) { %>
+              <tr>
+                <td colspan="9" class="empty-cell">No observation records found matching query parameters.</td>
+              </tr>
+            <% } else { %>
+              <% for (const o of items) { %>
+                <tr class="obs-row">
+                  <td class="mono"><a href="/app/observations?obs=<%= o.id %>" class="obs-id-link">#<%= o.id %></a></td>
+                  <td class="mono"><%= o.start %></td>
+                  <td><a href="/app/observations?obs=<%= o.id %>" class="target-link"><b><%= o.target %></b></a></td>
+                  <td class="mono"><%= o.ra_deg %>&deg;</td>
+                  <td class="mono"><%= o.dec_deg %>&deg;</td>
+                  <td class="mono"><%= o.duration_s != null ? o.duration_s + ' s' : '---' %></td>
+                  <td>
+                    <span class="status-badge badge-<%= o.status === 'completed' ? 'ok' : (o.status === 'in_progress' ? 'warn' : 'bad') %>">
+                      <%= o.status %>
+                    </span>
+                  </td>
+                  <td><%= o.owner %></td>
+                  <td>
+                    <div class="table-actions-cell">
+                      <a href="/app/observations?obs=<%= o.id %>" class="btn-micro" title="Inspect complete observational metadata">Inspect</a>
+                      <% if (o.owner === username || role === 'admin') { %>
+                        <form method="post" action="/api/observations/delete/<%= o.id %>" style="display:inline" onsubmit="return confirm('Delete record #<%= o.id %>?');">
+                          <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+                          <button class="btn-del-micro" type="submit" title="Delete record">&times;</button>
+                        </form>
+                      <% } %>
+                    </div>
+                  </td>
+                </tr>
+              <% } %>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Navigation -->
+      <div class="archive-pagination-bar mt-xs">
+        <span class="pagination-info">Page <%= page %> &middot; <%= total %> total observations recorded</span>
+        <div class="pagination-controls">
+          <% if (page > 1) { %>
+            <a class="btn-page" href="/app/observations?page=<%= page - 1 %>&q=<%= q || '' %>&status=<%= status_f || '' %>">&larr; Previous</a>
+          <% } %>
+          <% if (page * (typeof limit !== 'undefined' ? limit : 15) < total) { %>
+            <a class="btn-page" href="/app/observations?page=<%= page + 1 %>&q=<%= q || '' %>&status=<%= status_f || '' %>">Next &rarr;</a>
+          <% } %>
+        </div>
+      </div>
+      <% } %>
+    </section>
+  </div>
+</div>
+<%- include('partials/footer') %>

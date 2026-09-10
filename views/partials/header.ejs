@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="stcs-csrf-token" content="<%= csrf_token %>">
+<title><%= page_title %> — ARIES 104 cm Sampurnanand Telescope</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="theme-obs">
+<div class="app-layout" id="app-root">
+  <!-- Top Consolidated Header -->
+  <header class="station-header" id="station-header">
+    <div class="hdr-brand">
+      <div class="brand-crest">
+        <span class="crest-dot <%= (snap && snap.telemetry_status === 'LIVE') ? 'live' : 'stale' %>"></span>
+        <span class="crest-text">ARIES</span>
+      </div>
+      <div class="brand-details">
+        <span class="brand-title">104 cm Sampurnanand Telescope</span>
+        <span class="brand-sub">Manora Peak Observatory &middot; STCS v1.4</span>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="station-nav" id="main-nav" aria-label="Observatory Console Navigation">
+      <a href="/app/control" class="nav-tab <%= active === 'control' ? 'active' : '' %>" id="tab-control">
+        <span class="tab-icon">&#9788;</span> CONTROL
+      </a>
+      <a href="/app/observations" class="nav-tab <%= active === 'observations' ? 'active' : '' %>" id="tab-observations">
+        <span class="tab-icon">&#9776;</span> OBSERVATIONS
+      </a>
+      <a href="/app/camera" class="nav-tab <%= active === 'camera' ? 'active' : '' %>" id="tab-camera">
+        <span class="tab-icon">&#9678;</span> CAMERA
+      </a>
+      <a href="/app/system" class="nav-tab <%= active === 'system' ? 'active' : '' %>" id="tab-system">
+        <span class="tab-icon">&#9881;</span> SYSTEM
+      </a>
+      <% if (role === 'admin') { %>
+      <a href="/app/admin" class="nav-tab <%= active === 'admin' ? 'active' : '' %>" id="tab-admin">
+        <span class="tab-icon">&#9813;</span> ADMIN
+      </a>
+      <% } %>
+    </nav>
+
+    <!-- Telemetry Quick Health -->
+    <div class="hdr-telemetry">
+      <div class="tele-chip" title="Mount Subsystem Status">
+        <span class="chip-lbl">MOUNT</span>
+        <span class="chip-val <%= (snap && snap.telemetry_status === 'LIVE') ? 'ok' : 'warn' %>" data-live="telemetry"><%= (snap && snap.telemetry_status) ? snap.telemetry_status : '---' %></span>
+      </div>
+      <div class="tele-chip" title="Dome Status">
+        <span class="chip-lbl">DOME</span>
+        <span class="chip-val <%= (snap && snap.dome && snap.dome.state === 'IDLE') ? 'ok' : 'warn' %>"><%= (snap && snap.dome && snap.dome.state) ? snap.dome.state : 'IDLE' %></span>
+      </div>
+      <div class="tele-chip" title="Weather Station">
+        <span class="chip-lbl">WX</span>
+        <span class="chip-val <%= (snap && snap.weather && snap.weather.status === 'LIVE') ? 'ok' : 'dim' %>" data-live="wx-status"><%= (snap && snap.weather && snap.weather.status) ? snap.weather.status : '---' %></span>
+      </div>
+      <div class="tele-chip" title="Control Lock Ownership">
+        <span class="chip-lbl">LOCK</span>
+        <span class="chip-val <%= (snap && snap.control_lock && snap.control_lock.owner) ? 'warn' : 'dim' %>" id="hdr-lock-val"><%= (snap && snap.control_lock && snap.control_lock.owner) ? snap.control_lock.owner : 'Free' %></span>
+      </div>
+    </div>
+
+    <!-- Station Clocks -->
+    <div class="hdr-clocks">
+      <div class="clock-box" title="Local Station Time">
+        <span class="clock-time mono" id="clock">--:--:--</span>
+        <span class="clock-lbl">LOCAL IST</span>
+      </div>
+      <div class="clock-box" title="Local Sidereal Time">
+        <span class="clock-time mono" data-live="lst"><%= (typeof lst_hms !== 'undefined' && lst_hms) ? lst_hms : '--:--:--' %></span>
+        <span class="clock-lbl">LST</span>
+      </div>
+    </div>
+
+    <!-- User Meta & Actions -->
+    <div class="hdr-actions">
+      <div class="user-badge" title="Authenticated User">
+        <span class="user-avatar"><%= username ? username.charAt(0).toUpperCase() : 'U' %></span>
+        <div class="user-meta">
+          <span class="user-name"><%= username %></span>
+          <span class="user-role role-<%= role %>"><%= role ? (role.charAt(0).toUpperCase() + role.slice(1)) : 'Scientist' %></span>
+        </div>
+      </div>
+      
+      <form method="post" action="/api/command/emergency-stop" onsubmit="return confirm('INITIATE EMERGENCY STOP?\nThis will halt all mount drive motors and dome motion immediately.');" style="display:inline">
+        <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+        <button class="btn-estop" type="submit" id="btn-hdr-estop" title="Emergency Stop active telescope motion immediately">E-STOP</button>
+      </form>
+
+      <form method="post" action="/api/logout" style="display:inline">
+        <input type="hidden" name="_stcs_csrf_token" value="<%= csrf_token %>">
+        <button class="btn-logout" type="submit" id="btn-hdr-logout" title="Sign out of telescope control session">Sign Out</button>
+      </form>
+    </div>
+  </header>
+
+  <!-- Secondary Operational Status Ribbon -->
+  <div class="station-ribbon <%= alert_cls %>" id="station-ribbon">
+    <div class="ribbon-left">
+      <span class="status-indicator-dot"></span>
+      <span class="ribbon-mode"><%= mode %></span>
+      <span class="ribbon-sep">&middot;</span>
+      <span class="ribbon-message"><%= alert_text %></span>
+    </div>
+    <div class="ribbon-right">
+      <span class="ribbon-stat">SAFETY: <b class="st-<%= (snap && snap.safety && snap.safety.overall) ? snap.safety.overall.toLowerCase() : 'ok' %>" data-live="safety"><%= (snap && snap.safety && snap.safety.overall) ? snap.safety.overall : 'SAFE' %></b></span>
+      <span class="ribbon-sep">&middot;</span>
+      <span class="ribbon-stat">COMMANDS: <b><%= commands_enabled === 'YES' ? 'ENABLED' : 'SAFE LOCKED' %></b></span>
+      <span class="ribbon-sep">&middot;</span>
+      <span class="ribbon-site">Manora Peak 29.36&deg; N, 79.46&deg; E &middot; Elev 1,927 m</span>
+    </div>
+  </div>
+
+  <!-- Workspace Container -->
+  <main class="station-workspace" id="workspace-root">

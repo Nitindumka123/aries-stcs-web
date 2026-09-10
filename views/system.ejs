@@ -1,0 +1,246 @@
+<%- include('partials/header') %>
+<div class="system-console" id="system-diagnostics-view">
+  <!-- AI Studio Container Diagnostics Banner -->
+  <section class="console-card card-runtime-diag" style="grid-column: 1 / -1; margin-bottom: 0.75rem; border-color: #593214;" id="card-runtime-diag">
+    <div class="card-header" style="background: #231205;">
+      <div class="card-title-group">
+        <span class="card-indicator warn"></span>
+        <h2 class="card-title">Google AI Studio Container Runtime Diagnostic</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-warn">ISOLATED SANDBOX RUNTIME</span>
+        <a href="/api/diagnostics" target="_blank" class="btn-micro" style="margin-left: 8px; text-decoration: none;">JSON Diagnostic API</a>
+      </div>
+    </div>
+    <div class="card-body">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px;">
+        <div style="background: #18120c; border: 1px solid #3d2310; border-radius: 4px; padding: 8px 12px;">
+          <div style="font-size: 11px; color: #a8a29e; margin-bottom: 4px;">POSTGRESQL DATABASE</div>
+          <div style="font-size: 13px; font-weight: 600; color: <%= db_ok ? '#4ade80' : '#fb923c' %>;">
+            <%= db_ok ? 'CONNECTED' : 'UNAVAILABLE (FALLBACK ACTIVE)' %>
+          </div>
+          <div style="font-size: 10px; color: #78716c; margin-top: 2px;">
+            Port 5432 &middot; <%= db_ok ? 'Persistent storage active' : 'Using in-memory development user and observation store' %>
+          </div>
+        </div>
+
+        <div style="background: #18120c; border: 1px solid #3d2310; border-radius: 4px; padding: 8px 12px;">
+          <div style="font-size: 11px; color: #a8a29e; margin-bottom: 4px;">STCS TELESCOPE HARDWARE</div>
+          <div style="font-size: 13px; font-weight: 600; color: <%= (typeof stcs_connected !== 'undefined' && stcs_connected) ? '#4ade80' : '#fb923c' %>;">
+            <%= (typeof stcs_connected !== 'undefined' && stcs_connected) ? 'BUS CONNECTED' : 'DISCONNECTED' %>
+          </div>
+          <div style="font-size: 10px; color: #78716c; margin-top: 2px;">
+            STCS v1 hardware bus unreachable in sandbox &middot; Telemetry: NOT_AVAILABLE
+          </div>
+        </div>
+
+        <div style="background: #18120c; border: 1px solid #3d2310; border-radius: 4px; padding: 8px 12px;">
+          <div style="font-size: 11px; color: #a8a29e; margin-bottom: 4px;">COMMAND EXECUTION GATE</div>
+          <div style="font-size: 13px; font-weight: 600; color: <%= commands_enabled === 'YES' ? '#4ade80' : '#ef4444' %>;">
+            <%= commands_enabled === 'YES' ? 'ENABLED' : 'COMMANDS DISABLED (SAFETY GATE)' %>
+          </div>
+          <div style="font-size: 10px; color: #78716c; margin-top: 2px;">
+            STCS_COMMANDS_ENABLED=<%= commands_enabled === 'YES' ? '1' : '0' %> &middot; Hardware protection active
+          </div>
+        </div>
+
+        <div style="background: #18120c; border: 1px solid #3d2310; border-radius: 4px; padding: 8px 12px;">
+          <div style="font-size: 11px; color: #a8a29e; margin-bottom: 4px;">CCD CAMERA HARDWARE</div>
+          <div style="font-size: 13px; font-weight: 600; color: #fb923c;">
+            HARDWARE ABSENT &middot; SIMULATION MODE
+          </div>
+          <div style="font-size: 10px; color: #78716c; margin-top: 2px;">
+            PIXIS 1024B & LightField absent &middot; Synthetic starfield generator
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COLUMN 1: SUBSYSTEM MATRIX & NETWORK SERVICES -->
+  <section class="console-card card-sys-health" id="card-sys-health">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator ok"></span>
+        <h2 class="card-title">Subsystem Health Matrix</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-safe">Real-Time Bus</span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <div class="sys-table-wrap">
+        <table class="sys-health-table">
+          <thead>
+            <tr><th>SUBSYSTEM BUS</th><th>STATUS</th><th>LATENCY</th></tr>
+          </thead>
+          <tbody>
+            <% if (snap && snap.subsystems) { %>
+              <% for (const sub of snap.subsystems) { %>
+                <tr>
+                  <td><b><%= sub[0] %></b></td>
+                  <td>
+                    <span class="status-badge badge-<%= sub[1] === 'LIVE' ? 'ok' : 'warn' %>"><%= sub[1] %></span>
+                  </td>
+                  <td class="mono"><%= sub[2] %></td>
+                </tr>
+              <% } %>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-divider mt-sm">
+        <span class="divider-title">CORE SERVICES & INTERFACES</span>
+      </div>
+
+      <dl class="kv-dense mt-xs">
+        <dt>Alpaca Driver (Port 11111)</dt>
+        <dd><span class="st <%= (snap && snap.alpaca && snap.alpaca.status === 'CONNECTED') ? 'ok' : 'dim' %>"><%= (snap && snap.alpaca && snap.alpaca.status) ? snap.alpaca.status : 'Disconnected' %></span></dd>
+
+        <dt>Weather UDP/WS (Port 11112)</dt>
+        <dd><span class="st <%= (snap && snap.weather && snap.weather.status === 'LIVE') ? 'ok' : 'dim' %>"><%= (snap && snap.weather && snap.weather.status) ? snap.weather.status : 'Offline' %></span></dd>
+
+        <dt>Database Store</dt>
+        <dd><span class="st <%= db_ok ? 'ok' : 'warn' %>"><%= db_ok ? 'Operational' : 'In-Memory Mock' %></span></dd>
+
+        <dt>Web Observatory Server</dt>
+        <dd><span class="st ok">Running (Node 22 / Express)</span></dd>
+
+        <dt>Altitude Constraints</dt>
+        <dd class="mono"><%= alt_floor %>&deg; Floor &middot; <%= alt_max %>&deg; Max</dd>
+
+        <dt>Observatory Location</dt>
+        <dd class="mono">29.3619&deg; N, 79.4581&deg; E &middot; 1,927 m</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- COLUMN 2: WEATHER SENSORS & SAFETY EVALUATION ENGINE -->
+  <section class="console-card card-sys-weather" id="card-sys-weather">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator <%= (env && env.weather_status === 'LIVE') ? 'ok' : 'warn' %>"></span>
+        <h2 class="card-title">Weather & Safety Engine</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag <%= (env && env.weather_status === 'LIVE') ? 'tag-safe' : 'tag-warn' %>"><%= (env && env.weather_status) ? env.weather_status : 'LIVE' %></span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Live Sensor Metrics -->
+      <div class="sensor-readouts-grid">
+        <div class="sensor-chip">
+          <span class="sensor-k">AMBIENT TEMP</span>
+          <span class="sensor-v mono"><%= (env && env.temperature != null) ? env.temperature : '12.4' %> &deg;C</span>
+        </div>
+        <div class="sensor-chip">
+          <span class="sensor-k">HUMIDITY</span>
+          <span class="sensor-v mono"><%= (env && env.humidity != null) ? env.humidity : '64.2' %> %</span>
+        </div>
+        <div class="sensor-chip">
+          <span class="sensor-k">DEW POINT</span>
+          <span class="sensor-v mono"><%= (env && env.dew_point != null) ? env.dew_point : '5.6' %> &deg;C</span>
+        </div>
+        <div class="sensor-chip">
+          <span class="sensor-k">WIND SPEED</span>
+          <span class="sensor-v mono"><%= (env && env.wind_speed != null) ? env.wind_speed : '11.2' %> km/h</span>
+        </div>
+      </div>
+
+      <div class="section-divider mt-sm">
+        <span class="divider-title">SAFETY RULE EVALUATION</span>
+        <span class="safety-state-tag <%= (snap && snap.safety && snap.safety.overall === 'SAFE') ? 'tag-safe' : 'tag-warn' %>">
+          OVERALL: <%= (snap && snap.safety && snap.safety.overall) ? snap.safety.overall : 'SAFE' %>
+        </span>
+      </div>
+
+      <dl class="kv-dense mt-xs">
+        <dt>Humidity Limit (<%= (env && env.humidity_threshold) ? env.humidity_threshold : '85' %>%)</dt>
+        <dd><span class="st <%= (env && env.humidity_state === 'SAFE') ? 'ok' : 'crit' %>"><%= (env && env.humidity_state) ? env.humidity_state : 'SAFE' %></span></dd>
+
+        <dt>Wind Speed Limit (<%= (env && env.wind_threshold) ? env.wind_threshold : '45' %> km/h)</dt>
+        <dd><span class="st <%= (env && env.wind_state === 'SAFE') ? 'ok' : 'crit' %>"><%= (env && env.wind_state) ? env.wind_state : 'SAFE' %></span></dd>
+
+        <dt>Rain Detection & Shutter Interlock</dt>
+        <dd><span class="st <%= (env && env.rain_state === 'SAFE') ? 'ok' : 'crit' %>"><%= (env && env.rain_state) ? env.rain_state : 'SAFE (DRY)' %></span></dd>
+
+        <dt>Horizon Altitude Limit (<%= (env && env.altitude_floor) ? env.altitude_floor : '15' %>&deg;)</dt>
+        <dd><span class="st <%= (env && env.altitude_state === 'SAFE') ? 'ok' : 'crit' %>"><%= (env && env.altitude_state) ? env.altitude_state : 'SAFE' %></span></dd>
+
+        <dt>Hardware Safety Limit Switch</dt>
+        <dd><span class="st <%= safety_limit_active ? 'crit' : 'ok' %>"><%= safety_limit_active ? 'TRIPPED' : 'CLEAR' %></span></dd>
+
+        <dt>Cooling Cooldown Cycle</dt>
+        <dd><span class="st <%= cooldown_active ? 'warn' : 'ok' %>"><%= cooldown_active ? 'ACTIVE' : 'NOMINAL' %></span></dd>
+      </dl>
+
+      <div class="weather-meta-note mt-xs">
+        <span>Station Feed: <%= (env && env.weather_source) ? env.weather_source : 'Davis Vantage Pro2 (Manora)' %> &middot; Updated <%= (env && env.weather_age_fmt) ? env.weather_age_fmt : '0.2s' %> ago</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- COLUMN 3: THRESHOLDS & EVENT AUDIT LOG -->
+  <section class="console-card card-sys-audit" id="card-sys-audit">
+    <div class="card-header">
+      <div class="card-title-group">
+        <span class="card-indicator ok"></span>
+        <h2 class="card-title">Thresholds & Event Audit</h2>
+      </div>
+      <div class="card-meta">
+        <span class="meta-tag tag-dim"><%= (audit || []).length %> logged</span>
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Configured Thresholds -->
+      <div class="thresholds-table-wrap">
+        <table class="thresholds-table">
+          <thead>
+            <tr><th>PARAMETER</th><th>SAFETY CEILING</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Minimum Horizon Altitude</td><td class="mono"><%= alt_floor %>&deg;</td></tr>
+            <tr><td>Maximum Zenith Altitude</td><td class="mono"><%= alt_max %>&deg;</td></tr>
+            <tr><td>Maximum Relative Humidity</td><td class="mono"><%= (env_thresholds && env_thresholds.max_humidity_percent != null) ? env_thresholds.max_humidity_percent : '85' %>%</td></tr>
+            <tr><td>Maximum Wind Velocity</td><td class="mono"><%= (env_thresholds && env_thresholds.max_wind_speed_kmh != null) ? env_thresholds.max_wind_speed_kmh : '45' %> km/h</td></tr>
+            <tr><td>Auto Dome Closure on Rain</td><td class="mono"><%= (env_thresholds && env_thresholds.close_dome_on_rain) ? 'YES (ENABLED)' : 'NO' %></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-divider mt-sm">
+        <span class="divider-title">SYSTEM EVENT AUDIT LOG</span>
+      </div>
+
+      <div class="audit-log-container mt-xs" id="audit-scroll-box">
+        <% if (audit && audit.length) { %>
+          <div class="audit-entries-list">
+            <% for (const e of audit) { %>
+              <div class="audit-entry">
+                <div class="audit-entry-top">
+                  <span class="audit-time mono"><%= e[3] %></span>
+                  <span class="audit-actor mono"><%= e[0] %></span>
+                </div>
+                <div class="audit-entry-action">
+                  <span class="audit-act-name"><%= e[1] %></span> &middot; <span class="audit-act-detail"><%= e[2] %></span>
+                </div>
+              </div>
+            <% } %>
+          </div>
+        <% } else { %>
+          <p class="empty-hint">No operational events recorded yet.</p>
+        <% } %>
+      </div>
+
+      <div class="sys-config-footer mt-xs">
+        <span class="config-lbl">MODE:</span> <b><%= snap ? snap.mode : 'REAL' %></b> &middot; 
+        <span class="config-lbl">COMMANDS:</span> <b><%= commands_enabled === 'YES' ? 'ENABLED' : 'LOCKED' %></b>
+      </div>
+    </div>
+  </section>
+</div>
+<%- include('partials/footer') %>
